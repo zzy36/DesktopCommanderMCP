@@ -32,6 +32,8 @@
     "device:install": "cd src/remote-device && npm install",
     "device:start": "tsx src/remote-device/device.ts",
     "device:start:dev": "nodemon --watch src/remote-device --exec tsx src/remote-device/device.ts",
+    "fleet:agent": "node dist/remote-device/fleet/agent-main.js",
+    "fleet:gateway": "node dist/remote-device/fleet/gateway-main.js",
     "sync-version": "node scripts/sync-version.js",
     "bump": "node scripts/sync-version.js --bump",
     "bump:minor": "node scripts/sync-version.js --bump --minor",

@@ -1,0 +1,28 @@
+name: Fleet KVM Tunnel
+
+on:
+  push:
+    branches:
+      - feat/remote-fleet-kvm-tunnel
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node test/test-project-probe-policy.js
+      - run: node test/test-fleet-service-gateway.js
+      - run: node test/test-fleet-router.js
+      - run: node test/test-fleet-channel.js
+      - run: node test/test-fleet-auth.js

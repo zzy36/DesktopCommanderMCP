@@ -1,0 +1,12 @@
+# Replace fleet-mcp.home.arpa with the final LAN-only hostname.
+# The certificate must be trusted by YUAN/HEMA and must match this hostname.
+# This listener exposes only the Fleet Agent WebSocket path to the LAN.
+
+fleet-mcp.home.arpa:9443 {
+    tls /etc/network-fleet/tls/fullchain.pem /etc/network-fleet/tls/privkey.pem
+
+    @agent path /agent
+    reverse_proxy @agent 127.0.0.1:8788
+
+    respond 404
+}
