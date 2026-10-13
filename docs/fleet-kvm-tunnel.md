@@ -11,6 +11,16 @@ Two independent control planes must coexist until explicit cutover approval:
 
 Do not disable, replace, reconfigure, or route around the official remote MCP as part of the prototype deployment.
 
+## Current construction-tool boundary
+
+Keep these capabilities distinct during development:
+
+- Remote Desktop Commander 0.2.52 is the current **official remote MCP construction channel**. Its exposed tool surface is device/file/terminal/process/search/config/control-plane operations; do not describe that 31-tool surface as local GUI or browser control.
+- Direct control of the user's local Edge/iKuai pages requires a separate **Computer Use / local GUI browser-control capability**. If that capability is not mounted in the current ChatGPT project/session, do not work around it by extracting browser cookies, passwords, or private session state and do not substitute an unrelated cloud browser connector.
+- A missing GUI tool mount does not authorize changing the bound device or project. `network.ikuai` remains exact-host bound to YUAN.
+
+The iKuai KVM must therefore be created through the normal authenticated web UI once the local GUI capability is available. The production router does not expose SSH for this workflow.
+
 ## Target topology
 
 ```text
