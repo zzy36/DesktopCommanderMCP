@@ -17,6 +17,10 @@ export interface FleetPluginBackend {
     writeTestFile(projectId: string, hostname: string, content: string): Promise<{ bytesWritten: number }>;
 }
 
+export interface FleetPluginMcpOptions {
+    enforceOAuthScopes?: boolean;
+}
+
 export interface FleetPluginHttpOptions {
     bearerToken?: string;
 }
@@ -45,7 +49,7 @@ function bearerMatches(req: IncomingMessage, expected: string | undefined): bool
 }
 
 function rejectUnauthorized(res: ServerResponse): void {
-    res.setHeader('www-authenticate', 'Bearer realm=\"network-fleet-plugin\"');
+    res.setHeader('www-authenticate', 'Bearer realm="network-fleet-plugin"');
     sendJson(res, 401, {
         jsonrpc: '2.0',
         error: { code: -32001, message: 'Unauthorized' },
@@ -53,11 +57,24 @@ function rejectUnauthorized(res: ServerResponse): void {
     });
 }
 
-export function createFleetPluginMcpServer(backend: FleetPluginBackend): McpServer {
+function requireScope(extra: { authInfo?: { scopes?: string[] } }, scope: string, enabled: boolean): void {
+    if (!enabled) return;
+    if (!extra.authInfo?.scopes?.includes(scope)) {
+        const error = new Error(`OAuth scope required: ${scope}`);
+        Object.assign(error, { code: 'INSUFFICIENT_SCOPE' });
+        throw error;
+    }
+}
+
+export function createFleetPluginMcpServer(
+    backend: FleetPluginBackend,
+    options: FleetPluginMcpOptions = {},
+): McpServer {
     const server = new McpServer({
         name: 'network-fleet-plugin',
         version: '0.1.0-poc',
     });
+    const enforceScopes = options.enforceOAuthScopes === true;
 
     server.registerTool('fleet_status', {
         title: 'Fleet Status',
@@ -71,9 +88,10 @@ export function createFleetPluginMcpServer(backend: FleetPluginBackend): McpServ
             destructiveHint: false,
             openWorldHint: false,
         },
-    }, async ({ project_id, hostname }) => jsonResult(
-        await backend.fleetStatus(project_id, hostname),
-    ));
+    }, async ({ project_id, hostname }, extra) => {
+        requireScope(extra, 'fleet:read', enforceScopes);
+        return jsonResult(await backend.fleetStatus(project_id, hostname));
+    });
 
     server.registerTool('list_devices', {
         title: 'List Fleet Devices',
@@ -86,10 +104,13 @@ export function createFleetPluginMcpServer(backend: FleetPluginBackend): McpServ
             destructiveHint: false,
             openWorldHint: false,
         },
-    }, async ({ project_id }) => jsonResult({
-        project_id,
-        devices: await backend.listDevices(project_id),
-    }));
+    }, async ({ project_id }, extra) => {
+        requireScope(extra, 'fleet:read', enforceScopes);
+        return jsonResult({
+            project_id,
+            devices: await backend.listDevices(project_id),
+        });
+    });
 
     server.registerTool('read_test_file', {
         title: 'Read Fleet Test File',
@@ -103,11 +124,14 @@ export function createFleetPluginMcpServer(backend: FleetPluginBackend): McpServ
             destructiveHint: false,
             openWorldHint: false,
         },
-    }, async ({ project_id, hostname }) => jsonResult({
-        project_id,
-        hostname,
-        content: await backend.readTestFile(project_id, hostname),
-    }));
+    }, async ({ project_id, hostname }, extra) => {
+        requireScope(extra, 'fleet:read', enforceScopes);
+        return jsonResult({
+            project_id,
+            hostname,
+            content: await backend.readTestFile(project_id, hostname),
+        });
+    });
 
     server.registerTool('write_test_file', {
         title: 'Write Fleet Test File',
@@ -122,11 +146,14 @@ export function createFleetPluginMcpServer(backend: FleetPluginBackend): McpServ
             destructiveHint: false,
             openWorldHint: false,
         },
-    }, async ({ project_id, hostname, content }) => jsonResult({
-        project_id,
-        hostname,
-        ...(await backend.writeTestFile(project_id, hostname, content)),
-    }));
+    }, async ({ project_id, hostname, content }, extra) => {
+        requireScope(extra, 'fleet:write', enforceScopes);
+        return jsonResult({
+            project_id,
+            hostname,
+            ...(await backend.writeTestFile(project_id, hostname, content)),
+        });
+    });
 
     return server;
 }
@@ -141,7 +168,7 @@ async function handleMcpRequest(
     try {
         await server.connect(transport);
         await transport.handleRequest(req, res);
-    } catch (error) {
+    } catch {
         if (!res.headersSent) {
             sendJson(res, 500, {
                 jsonrpc: '2.0',

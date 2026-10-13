@@ -151,7 +151,7 @@ async function createAndStartAgent() {
       reconnectMaxMs: 50,
       heartbeatMs: 50,
       heartbeatTimeoutMs: 500,
-      callTimeoutMs: 1500,
+      callTimeoutMs: 10000,
       random: () => 0.5,
     },
   });

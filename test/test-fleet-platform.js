@@ -34,7 +34,7 @@ const gateway = new FleetGateway({
   projects: [{ projectId: 'network.ikuai', hostname: 'YUAN', policyRevision }],
   generationStore: new FileGenerationStore(generationFile),
   audit,
-  callTimeoutMs: 3000,
+  callTimeoutMs: 10000,
   heartbeatTimeoutMs: 800,
   heartbeatSweepMs: 100,
 });
@@ -95,7 +95,7 @@ const agent = new FleetAgent({
     reconnectMaxMs: 80,
     heartbeatMs: 50,
     heartbeatTimeoutMs: 700,
-    callTimeoutMs: 2000,
+    callTimeoutMs: 10000,
     random: () => 0.5,
   },
 });
@@ -103,7 +103,7 @@ const agent = new FleetAgent({
 const backend = new FleetGatewayPluginBackend({
   gateway,
   probes: [{ projectId: 'network.ikuai', hostname: 'YUAN', path: probeFile }],
-  callTimeoutMs: 2500,
+  callTimeoutMs: 10000,
   maxWriteBytes: 4096,
 });
 const httpServer = createFleetPluginHttpServer(backend);

@@ -183,6 +183,10 @@ export class FleetAgent {
                     fleet_hostname: context.hostname,
                     fleet_call_id: context.callId,
                     fleet_generation: context.generation,
+                }, {
+                    signal: context.signal,
+                    timeout: this.options.channel?.callTimeoutMs,
+                    maxTotalTimeout: this.options.channel?.callTimeoutMs,
                 });
             },
             ...this.options.channel,

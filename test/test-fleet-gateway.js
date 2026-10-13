@@ -36,7 +36,7 @@ function createGateway() {
     projects: [{ projectId: 'network.ikuai', hostname: 'YUAN', policyRevision }],
     generationStore: generationStore(),
     audit,
-    callTimeoutMs: 2000,
+    callTimeoutMs: 10000,
     heartbeatTimeoutMs: 700,
     heartbeatSweepMs: 100,
   });
@@ -106,7 +106,7 @@ const agent = new FleetAgent({
     reconnectMaxMs: 80,
     heartbeatMs: 50,
     heartbeatTimeoutMs: 600,
-    callTimeoutMs: 1500,
+    callTimeoutMs: 10000,
     random: () => 0.5,
   },
 });

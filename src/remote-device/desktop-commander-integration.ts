@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { fileURLToPath } from 'url';
 import { captureRemote } from '../utils/capture.js';
@@ -291,7 +292,7 @@ export class DesktopCommanderIntegration {
         return null;
     }
 
-    async callClientTool(toolName: string, args: any, metadata?: any) {
+    async callClientTool(toolName: string, args: any, metadata?: any, requestOptions?: RequestOptions) {
         // Restart the child if it died since the last call, so a one-off crash
         // costs one failed call instead of wedging the device until a human
         // restarts `desktop-commander remote`.
@@ -304,7 +305,7 @@ export class DesktopCommanderIntegration {
                 name: toolName,
                 arguments: args,
                 _meta: { remote: true, ...metadata || {} }
-            } as any);
+            } as any, undefined, requestOptions);
             console.debug('[DEBUG] Tool call successful:', toolName);
             return result;
         } catch (error) {
