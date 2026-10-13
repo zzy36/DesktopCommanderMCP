@@ -1,0 +1,29 @@
+[Unit]
+Description=Network Fleet Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=network-fleet
+Group=network-fleet
+WorkingDirectory=/opt/network-fleet
+EnvironmentFile=/etc/network-fleet/gateway.env
+ExecStart=/usr/bin/node /opt/network-fleet/dist/remote-device/fleet/gateway-main.js --config /etc/network-fleet/gateway.json
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/network-fleet
+
+[Install]
+WantedBy=multi-user.target
