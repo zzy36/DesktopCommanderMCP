@@ -53,10 +53,22 @@ These files can remain for the existing hosted mode; the self-host transport sho
 
 `test/test-fleet-router.js` tests pure routing and identity behavior.
 
-`test/test-fleet-ws-poc.js` runs a loopback-only WebSocket gateway on `127.0.0.1` with two simulated agents. It exercises challenge-response, exact-host dispatch, disconnect cleanup, duplicate sessions, policy skew and the local authorization gate. It never opens a public listener. It also routes a read-only get_config call through the real DesktopCommanderIntegration and a transient local Desktop Commander MCP child.
+`test/test-fleet-ws-poc.js` runs a loopback-only WebSocket gateway on `127.0.0.1` with two simulated agents. It exercises challenge-response, exact-host dispatch, disconnect cleanup, duplicate sessions, policy skew and the local authorization gate. It never opens a public listener. It also routes a read-only `get_config` call through the real `DesktopCommanderIntegration` and a transient local Desktop Commander MCP child.
+
+`plugin-server.ts` adds a real stateless Streamable HTTP MCP surface using the Node HTTP server and the existing MCP SDK. The initial Plus/Personal-Plugin acceptance surface is deliberately small: `fleet_status`, `list_devices`, `read_test_file`, and `write_test_file`. The write probe cannot choose an arbitrary path; the backend owns the dedicated test path.
+
+`test/test-fleet-plugin-http.js` proves the complete local write path:
+
+`Streamable HTTP MCP -> Fleet exact-host router -> authenticated loopback WSS session -> YUAN agent -> DesktopCommanderIntegration -> Desktop Commander write_file/read_file`.
+
+The test writes only under a dedicated OS temporary directory, confirms the bytes on disk, reads the value back through Desktop Commander, and verifies that requesting HEMA for `network.ikuai` fails closed without changing the test file.
+
+The HTTP write proof is still local only. It does not imply that a public ChatGPT Plus Personal Plugin has been accepted until the same write tool succeeds through an authenticated HTTPS endpoint from ChatGPT itself.
 
 ## Next implementation seam
 
-The next step is to turn the loopback agent behavior into a production-quality `FleetChannel` beside the existing `RemoteChannel`, then feed accepted calls into `DesktopCommanderIntegration.callClientTool()` after the local `.control` policy gate. The gateway side should expose one stable Streamable HTTP MCP endpoint and translate an explicit `{ project_id, hostname, tool, args }` request into the exact authenticated WSS agent session.
+Turn the loopback agent behavior into a production-quality `FleetChannel` beside the existing `RemoteChannel`, then feed accepted calls into `DesktopCommanderIntegration.callClientTool()` after the local `.control` policy gate. Replace the test-only backend behind `plugin-server.ts` with the real gateway dispatcher while preserving the stable MCP tool schema.
 
-Do not deploy this PoC to the VPS until the gateway authentication, request timeout/cancellation, fencing token, audit log, restart recovery and Windows service behavior are implemented and tested.
+Before any VPS or Windows service deployment, implement and test gateway authentication, request timeout/cancellation, bounded pending calls, heartbeat/liveness, reconnect jitter, fencing/session generation, audit records, restart recovery and persistent device keys.
+
+Only after those controls pass locally should an authenticated HTTPS `/mcp` endpoint be exposed for the Plus Personal Plugin write acceptance test. The official Remote plugin remains enabled until the self-host path passes feature-parity and reliability acceptance.
