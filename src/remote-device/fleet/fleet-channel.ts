@@ -186,6 +186,9 @@ export class FleetChannel {
             case 'rejected':
                 this.socket?.close(4003, String(message.code ?? 'rejected'));
                 return;
+            case 'fenced':
+                this.socket?.close(4009, String(message.reason ?? 'fenced session'));
+                return;
             default:
                 throw new Error(`unsupported fleet message type: ${String(message.type)}`);
         }

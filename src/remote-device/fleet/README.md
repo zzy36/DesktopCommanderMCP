@@ -86,3 +86,23 @@ Only after those controls pass locally should an authenticated HTTPS `/mcp` endp
 `test/test-fleet-agent.js` proves a service-like lifecycle end to end: the agent authenticates to a loopback gateway, writes and reads through the real Desktop Commander child, rejects path escape and cross-project/cross-host requests, stops, starts as a fresh Agent instance, retains the same device fingerprint, receives a new fencing generation, and continues to execute authorized reads.
 
 The current safety boundary is deliberate: Desktop Commander remains the internal executor, but the public Plugin surface must not expose the raw 25-tool local API until each capability class has a local policy (filesystem roots, terminal commands, process control, config mutation, document operations, and other destructive actions). Feature parity is accepted only after those policies and reliability tests pass; parity does not mean bypassing authorization.
+
+## Gateway control plane now proven locally
+
+`gateway-state.ts` persists a monotonically increasing fencing generation per hostname before a session is accepted. This persistence is required across Gateway restarts because a still-running Agent must never accept a generation rollback. The file store serializes updates and uses atomic temp-file replacement.
+
+`fleet-gateway.ts` is the transport-neutral Gateway core. It verifies the Agent challenge signature and pinned fingerprint, requires the Gateway and Agent to agree on the `.control` policy revision, routes calls through `FleetRouter`, bounds pending calls, correlates results, sends cancellation on timeout, keeps bounded call records, performs heartbeat expiry, and exposes project-scoped device status. A second healthy authenticated process for the same hostname is rejected as `TARGET_AMBIGUOUS`; it does not silently replace the current process. New generations are accepted only after the prior session is gone or expired.
+
+`audit-log.ts` provides structured audit sinks. Gateway audit records contain routing and lifecycle metadata rather than tool arguments or result bodies. The JSONL sink also redacts common secret/content fields defensively.
+
+`gateway-plugin-backend.ts` connects the four initial MCP acceptance tools to the real Gateway. Test-file paths are Gateway configuration, not model-supplied arguments, so `write_test_file` cannot be turned into arbitrary filesystem write access.
+
+`test/test-fleet-gateway.js` proves authenticated Agent routing, completed call records, exact-host/project denial, duplicate live-agent ambiguity handling, audit behavior, and Gateway restart with a strictly increasing generation loaded from persistent state.
+
+`test/test-fleet-platform.js` proves the current complete local stack in one test:
+
+`Streamable HTTP /mcp -> FleetGatewayPluginBackend -> FleetGateway -> WSS -> FleetAgent -> live .control authorization -> DesktopCommanderIntegration -> Desktop Commander`.
+
+It exercises `fleet_status`, `list_devices`, `write_test_file`, and `read_test_file` through a real MCP client and verifies a HEMA request cannot modify the YUAN probe file.
+
+The next isolated milestone is authentication for the public HTTPS MCP endpoint. Because this private plugin exposes machine data and write actions, the public endpoint must not be deployed unauthenticated. The ChatGPT-facing path will use current MCP OAuth requirements while the Agent continues to enforce `.control` independently.
