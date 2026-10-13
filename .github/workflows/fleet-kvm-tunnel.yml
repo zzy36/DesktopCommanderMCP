@@ -25,6 +25,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: node test/test-project-probe-policy.js
+      - run: node test/test-fleet-service-config.js
       - run: node test/test-fleet-service-gateway.js
       - run: node test/test-fleet-router.js
       - run: node test/test-fleet-channel.js
