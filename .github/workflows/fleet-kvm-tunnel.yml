@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feat/remote-fleet-kvm-tunnel
+  pull_request:
+    branches:
+      - feat/remote-fleet-poc
   workflow_dispatch:
 
 permissions:
