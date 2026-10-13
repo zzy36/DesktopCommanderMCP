@@ -53,7 +53,7 @@ These files can remain for the existing hosted mode; the self-host transport sho
 
 `test/test-fleet-router.js` tests pure routing and identity behavior.
 
-`test/test-fleet-ws-poc.js` runs a loopback-only WebSocket gateway on `127.0.0.1` with two simulated agents. It exercises challenge-response, exact-host dispatch, disconnect cleanup, duplicate sessions, policy skew and the local authorization gate. It never opens a public listener.
+`test/test-fleet-ws-poc.js` runs a loopback-only WebSocket gateway on `127.0.0.1` with two simulated agents. It exercises challenge-response, exact-host dispatch, disconnect cleanup, duplicate sessions, policy skew and the local authorization gate. It never opens a public listener. It also routes a read-only get_config call through the real DesktopCommanderIntegration and a transient local Desktop Commander MCP child.
 
 ## Next implementation seam
 

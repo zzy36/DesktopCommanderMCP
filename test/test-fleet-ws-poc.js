@@ -9,6 +9,7 @@ import {
   verifyChallengeSignature,
 } from '../dist/remote-device/fleet/identity.js';
 import { FleetRouter } from '../dist/remote-device/fleet/router.js';
+import { DesktopCommanderIntegration } from '../dist/remote-device/desktop-commander-integration.js';
 
 const POLICY = 'control@8080d685';
 
@@ -92,7 +93,9 @@ server.on('connection', (socket) => {
   });
 });
 
-async function connectAgent({ hostname, key, policyRevision = POLICY, localAuthorize = () => true }) {
+async function connectAgent({
+  hostname, key, policyRevision = POLICY, localAuthorize = () => true, executor = null,
+}) {
   const socket = new WebSocket(url);
   const canonical = canonicalHostname(hostname);
 
@@ -133,10 +136,19 @@ async function connectAgent({ hostname, key, policyRevision = POLICY, localAutho
           }));
           return;
         }
-        socket.send(JSON.stringify({
-          type: 'result', callId: message.callId, ok: true,
-          result: { host: canonical, tool: message.toolName, projectId: message.projectId },
-        }));
+        try {
+          const executed = executor
+            ? await executor(message)
+            : { host: canonical, tool: message.toolName, projectId: message.projectId };
+          socket.send(JSON.stringify({
+            type: 'result', callId: message.callId, ok: true, result: executed,
+          }));
+        } catch (error) {
+          socket.send(JSON.stringify({
+            type: 'result', callId: message.callId, ok: false,
+            code: 'LOCAL_EXECUTION_FAILED', error: error?.message ?? String(error),
+          }));
+        }
       }
     });
     socket.once('error', reject);
@@ -210,6 +222,23 @@ assert.equal(result.ok, false);
 assert.equal(result.code, 'PROJECT_DEVICE_DENIED');
 
 await closeAgent(yuan);
+
+const desktop = new DesktopCommanderIntegration();
+await desktop.initialize();
+const integratedYuan = await connectAgent({
+  hostname: 'YUAN', key: yuanKey,
+  executor: (message) => desktop.callClientTool(
+    message.toolName,
+    message.args ?? {},
+    { project_id: message.projectId, fleet_poc: true },
+  ),
+});
+result = await dispatch('network.ikuai', 'YUAN', 'get_config');
+assert.equal(result.ok, true);
+assert.equal(Array.isArray(result.result?.content), true);
+await closeAgent(integratedYuan);
+await desktop.shutdown();
+
 await closeAgent(hema);
 await new Promise((resolve) => server.close(resolve));
 console.log('fleet websocket PoC tests passed');
