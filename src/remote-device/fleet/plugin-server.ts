@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -16,6 +17,10 @@ export interface FleetPluginBackend {
     writeTestFile(projectId: string, hostname: string, content: string): Promise<{ bytesWritten: number }>;
 }
 
+export interface FleetPluginHttpOptions {
+    bearerToken?: string;
+}
+
 function jsonResult(value: unknown) {
     return {
         content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }],
@@ -28,6 +33,24 @@ function sendJson(res: ServerResponse, status: number, value: unknown): void {
     res.setHeader('content-type', 'application/json; charset=utf-8');
     res.setHeader('content-length', Buffer.byteLength(body));
     res.end(body);
+}
+
+function bearerMatches(req: IncomingMessage, expected: string | undefined): boolean {
+    if (!expected) return true;
+    const header = req.headers.authorization;
+    if (!header?.startsWith('Bearer ')) return false;
+    const provided = Buffer.from(header.slice(7), 'utf8');
+    const wanted = Buffer.from(expected, 'utf8');
+    return provided.length === wanted.length && timingSafeEqual(provided, wanted);
+}
+
+function rejectUnauthorized(res: ServerResponse): void {
+    res.setHeader('www-authenticate', 'Bearer realm=\"network-fleet-plugin\"');
+    sendJson(res, 401, {
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Unauthorized' },
+        id: null,
+    });
 }
 
 export function createFleetPluginMcpServer(backend: FleetPluginBackend): McpServer {
@@ -132,7 +155,10 @@ async function handleMcpRequest(
     }
 }
 
-export function createFleetPluginHttpServer(backend: FleetPluginBackend) {
+export function createFleetPluginHttpServer(
+    backend: FleetPluginBackend,
+    options: FleetPluginHttpOptions = {},
+) {
     return createServer(async (req, res) => {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1');
 
@@ -146,6 +172,10 @@ export function createFleetPluginHttpServer(backend: FleetPluginBackend) {
         }
         if (url.pathname !== '/mcp') {
             sendJson(res, 404, { error: 'not found' });
+            return;
+        }
+        if (!bearerMatches(req, options.bearerToken)) {
+            rejectUnauthorized(res);
             return;
         }
         if (req.method !== 'POST') {
