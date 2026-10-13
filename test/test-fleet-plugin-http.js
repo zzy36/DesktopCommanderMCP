@@ -16,10 +16,14 @@ import {
 import { FleetRouter } from '../dist/remote-device/fleet/router.js';
 import { DesktopCommanderIntegration } from '../dist/remote-device/desktop-commander-integration.js';
 import { createFleetPluginHttpServer } from '../dist/remote-device/fleet/plugin-server.js';
+import { ControlPolicyAuthorizer } from '../dist/remote-device/fleet/control-policy.js';
 
 const PROJECT_ID = 'network.ikuai';
 const HOSTNAME = 'YUAN';
-const POLICY = 'control@plugin-poc';
+const controlPolicy = process.env.FLEET_TEST_CONTROL_ROOT
+  ? new ControlPolicyAuthorizer({ controlRoot: process.env.FLEET_TEST_CONTROL_ROOT })
+  : null;
+const POLICY = controlPolicy ? await controlPolicy.policyRevision() : 'control@plugin-poc';
 const testRoot = join(tmpdir(), 'network-fleet-plugin-poc');
 const testFile = join(testRoot, 'write-probe.txt');
 
@@ -148,14 +152,14 @@ async function connectYuanAgent() {
       }
       if (message.type !== 'call') return;
 
-      if (message.projectId !== PROJECT_ID || canonicalHostname(message.hostname) !== HOSTNAME) {
-        socket.send(JSON.stringify({
-          type: 'result', callId: message.callId, ok: false, code: 'PROJECT_DEVICE_DENIED',
-        }));
-        return;
-      }
-
       try {
+        if (controlPolicy) {
+          await controlPolicy.authorize(message.projectId, message.hostname);
+        } else if (message.projectId !== PROJECT_ID || canonicalHostname(message.hostname) !== HOSTNAME) {
+          const error = new Error('PROJECT_DEVICE_DENIED');
+          error.code = 'PROJECT_DEVICE_DENIED';
+          throw error;
+        }
         const result = await desktop.callClientTool(
           message.toolName,
           message.args ?? {},
@@ -165,7 +169,7 @@ async function connectYuanAgent() {
       } catch (error) {
         socket.send(JSON.stringify({
           type: 'result', callId: message.callId, ok: false,
-          code: 'LOCAL_EXECUTION_FAILED', error: error?.message ?? String(error),
+          code: error?.code ?? 'LOCAL_EXECUTION_FAILED', error: error?.message ?? String(error),
         }));
       }
     });
@@ -278,6 +282,7 @@ for (let i = 0; i < 50 && sockets.has(agent.sessionId); i++) {
   await new Promise((resolve) => setTimeout(resolve, 2));
 }
 await desktop.shutdown();
+if (controlPolicy) await controlPolicy.stop();
 await new Promise((resolve) => wsServer.close(resolve));
 await rm(testRoot, { recursive: true, force: true });
 

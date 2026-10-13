@@ -72,3 +72,17 @@ Turn the loopback agent behavior into a production-quality `FleetChannel` beside
 Before any VPS or Windows service deployment, implement and test gateway authentication, request timeout/cancellation, bounded pending calls, heartbeat/liveness, reconnect jitter, fencing/session generation, audit records, restart recovery and persistent device keys.
 
 Only after those controls pass locally should an authenticated HTTPS `/mcp` endpoint be exposed for the Plus Personal Plugin write acceptance test. The official Remote plugin remains enabled until the self-host path passes feature-parity and reliability acceptance.
+
+## Agent hardening now proven locally
+
+`fleet-channel.ts` is the production-oriented outbound agent transport. It adds challenge-response authentication, application heartbeat/liveness, exponential reconnect with jitter, bounded in-flight calls, cooperative cancellation/timeouts, duplicate-call result replay, and a monotonically increasing gateway `generation` fence. A call carrying a stale generation returns `FENCED_SESSION`; a duplicate call ID replays the cached result instead of executing twice.
+
+`control-policy.ts` intentionally does not reimplement `.control` policy rules. It keeps a long-lived Python bridge to the existing `machine_control_gateway.py` and calls its `_authorize_project()` for each authorization request, so project/device/partition/override/physical-root decisions continue to come from the current authoritative registries. The bridge also resolves the `.control` Git HEAD as the advertised policy revision. If that revision changes, an authenticated Fleet session is considered stale and must re-handshake.
+
+`device-identity.ts` persists a per-machine Ed25519 identity. Stable routing identity is therefore canonical hostname plus pinned public-key fingerprint; official account IDs, link IDs, hosted device IDs and websocket session IDs remain ephemeral and are never trusted as durable identity.
+
+`fleet-agent.ts` composes the persistent device identity, real `.control` authorization, `FleetChannel`, a required fail-closed per-tool policy, and `DesktopCommanderIntegration`. The agent cannot be constructed without a tool policy. The included `createDedicatedTestFilePolicy()` permits only `read_file` / `write_file` to one exact probe file and rejects all other tools and paths.
+
+`test/test-fleet-agent.js` proves a service-like lifecycle end to end: the agent authenticates to a loopback gateway, writes and reads through the real Desktop Commander child, rejects path escape and cross-project/cross-host requests, stops, starts as a fresh Agent instance, retains the same device fingerprint, receives a new fencing generation, and continues to execute authorized reads.
+
+The current safety boundary is deliberate: Desktop Commander remains the internal executor, but the public Plugin surface must not expose the raw 25-tool local API until each capability class has a local policy (filesystem roots, terminal commands, process control, config mutation, document operations, and other destructive actions). Feature parity is accepted only after those policies and reliability tests pass; parity does not mean bypassing authorization.
