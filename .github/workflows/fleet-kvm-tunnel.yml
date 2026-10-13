@@ -29,3 +29,10 @@ jobs:
       - run: node test/test-fleet-router.js
       - run: node test/test-fleet-channel.js
       - run: node test/test-fleet-auth.js
+      - name: Parse Windows Agent deployment scripts
+        shell: pwsh
+        run: |
+          [void][scriptblock]::Create((Get-Content deploy/fleet-windows/install-agent-task.ps1 -Raw))
+          [void][scriptblock]::Create((Get-Content deploy/fleet-windows/uninstall-agent-task.ps1 -Raw))
+      - name: Parse KVM preflight script
+        run: bash -n deploy/fleet-kvm/preflight-readonly.sh
