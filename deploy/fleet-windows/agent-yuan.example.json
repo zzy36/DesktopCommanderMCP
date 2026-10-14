@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "gatewayUrl": "wss://fleet-mcp.home.arpa:9443/agent",
+  "hostname": "YUAN",
+  "probeFileName": ".network-fleet-plugin-probe.txt",
+  "policyWatchMs": 5000,
+  "channel": {
+    "reconnectBaseMs": 1000,
+    "reconnectMaxMs": 30000,
+    "heartbeatMs": 10000,
+    "heartbeatTimeoutMs": 45000,
+    "callTimeoutMs": 15000,
+    "maxInFlight": 8,
+    "completedResultCacheSize": 256
+  }
+}

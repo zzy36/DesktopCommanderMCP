@@ -124,25 +124,37 @@ export class FleetAgent {
         if (this.policyTimer) clearInterval(this.policyTimer);
         const watchMs = this.options.policyWatchMs ?? 5_000;
         this.policyTimer = setInterval(() => {
-            void this.refreshPolicyRevision();
+            void this.refreshPolicyRevision().catch(() => undefined);
         }, watchMs);
     }
 
     private async refreshPolicyRevision(): Promise<void> {
         if (!this.started) return;
         if (!this.refreshPromise) {
-            this.refreshPromise = this.refreshPolicyRevisionOnce().finally(() => {
-                this.refreshPromise = null;
-            });
+            this.refreshPromise = this.refreshPolicyRevisionOnce()
+                .catch(async (error) => {
+                    await this.suspendChannel();
+                    throw error;
+                })
+                .finally(() => {
+                    this.refreshPromise = null;
+                });
         }
         await this.refreshPromise;
     }
 
     private async refreshPolicyRevisionOnce(): Promise<void> {
         const revision = await this.authorizer.policyRevision();
-        if (!this.started || revision === this.policyRevision) return;
+        if (!this.started) return;
+        if (revision === this.policyRevision && this.channel) return;
         this.policyRevision = revision;
         await this.replaceChannel(revision);
+    }
+
+    private async suspendChannel(): Promise<void> {
+        const channel = this.channel;
+        this.channel = null;
+        await channel?.stop().catch(() => undefined);
     }
 
     private async replaceChannel(revision: string): Promise<void> {
@@ -194,6 +206,49 @@ export class FleetAgent {
         this.channel = channel;
         channel.start();
     }
+}
+
+export function createProjectProbePolicy(
+    fileName = '.network-fleet-plugin-probe.txt',
+    maxWriteBytes = 4_096,
+): FleetToolPolicy {
+    if (!fileName || path.basename(fileName) !== fileName || fileName === '.' || fileName === '..') {
+        throw new Error('project probe fileName must be a single file name without path separators');
+    }
+    return async (toolName, args, context) => {
+        if (toolName !== 'read_file' && toolName !== 'write_file') {
+            throw Object.assign(new Error(`tool is not enabled by the project-probe policy: ${toolName}`), {
+                code: 'PROJECT_DEVICE_DENIED',
+            });
+        }
+        if (args.path !== undefined) {
+            throw Object.assign(new Error('project-probe policy does not accept a caller-supplied path'), {
+                code: 'PROJECT_DEVICE_DENIED',
+            });
+        }
+        const physicalRoot = context.authorization.physicalRoot;
+        if (!physicalRoot) {
+            throw Object.assign(new Error('authorized project has no physical_root'), {
+                code: 'PROJECT_DEVICE_DENIED',
+            });
+        }
+        const probePath = path.join(physicalRoot, fileName);
+        if (toolName === 'write_file') {
+            if (args.mode !== undefined && args.mode !== 'rewrite') {
+                throw Object.assign(new Error('project-probe policy permits rewrite mode only'), {
+                    code: 'PROJECT_DEVICE_DENIED',
+                });
+            }
+            const content = typeof args.content === 'string' ? args.content : '';
+            if (Buffer.byteLength(content, 'utf8') > maxWriteBytes) {
+                throw Object.assign(new Error(`project-probe write exceeds ${maxWriteBytes} bytes`), {
+                    code: 'PROJECT_DEVICE_DENIED',
+                });
+            }
+            return { ...args, path: probePath, mode: 'rewrite' };
+        }
+        return { ...args, path: probePath };
+    };
 }
 
 export function createDedicatedTestFilePolicy(testFilePath: string, maxWriteBytes = 4_096): FleetToolPolicy {

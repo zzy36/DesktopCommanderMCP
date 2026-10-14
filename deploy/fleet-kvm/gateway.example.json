@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "mcp": {
+    "listenHost": "127.0.0.1",
+    "listenPort": 8787,
+    "auth": {
+      "type": "bearer",
+      "tokenEnv": "FLEET_MCP_BEARER_TOKEN"
+    }
+  },
+  "agent": {
+    "listenHost": "127.0.0.1",
+    "listenPort": 8788,
+    "path": "/agent"
+  },
+  "admin": {
+    "listenHost": "127.0.0.1",
+    "listenPort": 8789,
+    "basePath": "/admin"
+  },
+  "stateDir": "/var/lib/network-fleet",
+  "devices": [
+    {
+      "hostname": "YUAN",
+      "publicKeyFingerprint": "sha256:REPLACE_WITH_64_LOWERCASE_HEX"
+    }
+  ],
+  "projects": [
+    {
+      "projectId": "network.ikuai",
+      "hostname": "YUAN",
+      "policyRevision": "control@REPLACE12HEX"
+    }
+  ],
+  "probes": [
+    {
+      "projectId": "network.ikuai",
+      "hostname": "YUAN"
+    }
+  ],
+  "callTimeoutMs": 15000,
+  "maxPendingCalls": 64,
+  "callRecordLimit": 1024,
+  "heartbeatTimeoutMs": 45000,
+  "heartbeatSweepMs": 5000
+}

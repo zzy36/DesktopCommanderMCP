@@ -197,4 +197,52 @@ assert.equal(result.result.args.after, 'reconnect');
 
 await channel.stop();
 await new Promise((resolve) => server.close(resolve));
+
+class StalledSocket extends EventTarget {
+  readyState = 0;
+  send() {}
+  close() { this.readyState = 2; }
+}
+
+function makeStalledChannel(socketFactory, heartbeatTimeoutMs = 60) {
+  return new FleetChannel({
+    url: 'ws://stalled.invalid',
+    hostname: 'YUAN',
+    policyRevision: POLICY,
+    publicKeyPem,
+    privateKey,
+    reconnectBaseMs: 5,
+    reconnectMaxMs: 10,
+    heartbeatMs: 10,
+    heartbeatTimeoutMs,
+    callTimeoutMs: 100,
+    random: () => 0.5,
+    authorize: () => true,
+    execute: async () => ({ ok: true }),
+    socketFactory,
+  });
+}
+
+const errorSockets = [];
+const errorChannel = makeStalledChannel(() => {
+  const socket = new StalledSocket();
+  errorSockets.push(socket);
+  return socket;
+}, 500);
+errorChannel.start();
+assert.equal(errorSockets.length, 1);
+errorSockets[0].dispatchEvent(new Event('error'));
+await waitFor(() => errorSockets.length >= 2, 300);
+await errorChannel.stop();
+
+const deadlineSockets = [];
+const deadlineChannel = makeStalledChannel(() => {
+  const socket = new StalledSocket();
+  deadlineSockets.push(socket);
+  return socket;
+}, 40);
+deadlineChannel.start();
+await waitFor(() => deadlineSockets.length >= 2, 300);
+await deadlineChannel.stop();
+
 console.log('fleet channel reliability tests passed');

@@ -169,6 +169,18 @@ try {
   assert.equal(agent.getState().publicKeyFingerprint, acceptedInfo.fingerprint);
   assert.equal(agent.getState().desktopReady, true);
 
+  const originalPolicyRevision = agent.authorizer.policyRevision.bind(agent.authorizer);
+  agent.authorizer.policyRevision = async () => {
+    throw new Error('simulated transient policy revision failure');
+  };
+  await waitFor(() => agent.getState().channel === null);
+  assert.equal(agent.getState().started, true, 'transient policy read failure must not kill the agent');
+  const recovered = waitForAccepted();
+  agent.authorizer.policyRevision = originalPolicyRevision;
+  const recoveredInfo = await recovered;
+  await waitFor(() => agent.getState().channel?.authenticated === true);
+  assert.equal(recoveredInfo.fingerprint, acceptedInfo.fingerprint);
+
   const probe = `fleet-agent-write-ok-${randomUUID()}`;
   let result = await callAgent({
     toolName: 'write_file',

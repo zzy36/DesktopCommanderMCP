@@ -1,0 +1,20 @@
+config_version: 1
+control_plane:
+  base_url: "https://api.openai.com"
+  api_key: "env:CONTROL_PLANE_API_KEY"
+health:
+  listen_addr: "127.0.0.1:8790"
+admin_ui:
+  open_browser: false
+log:
+  level: info
+  format: json
+mcp:
+  server_urls:
+    - channel: main
+      url: "http://127.0.0.1:8787/mcp"
+  extra_headers:
+    Authorization: "file:/etc/network-fleet/mcp-authorization"
+  discovery_extra_headers:
+    Authorization: "file:/etc/network-fleet/mcp-authorization"
+  startup_wait_timeout: 30s

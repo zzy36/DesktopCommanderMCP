@@ -76,6 +76,7 @@ export class FleetChannel {
     private highestAcceptedGeneration = 0;
     private reconnectAttempt = 0;
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    private connectDeadlineTimer: ReturnType<typeof setTimeout> | null = null;
     private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     private lastGatewaySeenAt = 0;
     private readonly pendingCalls = new Map<string, PendingCall>();
@@ -119,6 +120,7 @@ export class FleetChannel {
         this.started = false;
         this.authenticated = false;
         this.clearReconnectTimer();
+        this.clearConnectDeadline();
         this.stopHeartbeat();
         for (const pending of this.pendingCalls.values()) {
             clearTimeout(pending.timer);
@@ -137,12 +139,19 @@ export class FleetChannel {
     private connect(): void {
         if (!this.started || this.socket) return;
         const socketFactory = this.options.socketFactory ?? ((url: string) => new WebSocket(url));
-        const socket = socketFactory(this.options.url);
+        let socket: WebSocket;
+        try {
+            socket = socketFactory(this.options.url);
+        } catch {
+            this.scheduleReconnect();
+            return;
+        }
         this.socket = socket;
         this.authenticated = false;
         this.sessionId = null;
         this.generation = null;
         this.lastGatewaySeenAt = Date.now();
+        this.startConnectDeadline(socket);
 
         socket.addEventListener('message', (event) => {
             this.lastGatewaySeenAt = Date.now();
@@ -152,17 +161,11 @@ export class FleetChannel {
         });
 
         socket.addEventListener('close', () => {
-            if (this.socket === socket) this.socket = null;
-            this.authenticated = false;
-            this.sessionId = null;
-            this.generation = null;
-            this.stopHeartbeat();
-            this.cancelPendingForDisconnect();
-            this.scheduleReconnect();
+            this.dropSocket(socket);
         });
 
         socket.addEventListener('error', () => {
-            // The close event owns reconnect scheduling. Avoid duplicate reconnect timers.
+            this.dropSocket(socket, 4007, 'fleet socket error');
         });
     }
 
@@ -224,6 +227,7 @@ export class FleetChannel {
         this.sessionId = sessionId;
         this.generation = generation;
         this.authenticated = true;
+        this.clearConnectDeadline();
         this.reconnectAttempt = 0;
         this.lastGatewaySeenAt = Date.now();
         this.startHeartbeat();
@@ -362,11 +366,45 @@ export class FleetChannel {
             if (!this.authenticated || this.generation === null) return;
             const now = Date.now();
             if (now - this.lastGatewaySeenAt > this.options.heartbeatTimeoutMs) {
-                this.socket?.close(4008, 'gateway heartbeat timeout');
+                const socket = this.socket;
+                if (socket) this.dropSocket(socket, 4008, 'gateway heartbeat timeout');
                 return;
             }
             this.send({ type: 'heartbeat', generation: this.generation, now });
         }, this.options.heartbeatMs);
+    }
+
+    private startConnectDeadline(socket: WebSocket): void {
+        this.clearConnectDeadline();
+        this.connectDeadlineTimer = setTimeout(() => {
+            this.connectDeadlineTimer = null;
+            if (this.socket !== socket || this.authenticated) return;
+            this.dropSocket(socket, 4008, 'fleet authentication timeout');
+        }, this.options.heartbeatTimeoutMs);
+    }
+
+    private clearConnectDeadline(): void {
+        if (this.connectDeadlineTimer) clearTimeout(this.connectDeadlineTimer);
+        this.connectDeadlineTimer = null;
+    }
+
+    private dropSocket(socket: WebSocket, code?: number, reason?: string): void {
+        if (this.socket !== socket) return;
+        this.socket = null;
+        this.authenticated = false;
+        this.sessionId = null;
+        this.generation = null;
+        this.clearConnectDeadline();
+        this.stopHeartbeat();
+        this.cancelPendingForDisconnect();
+        if (socket.readyState < 2 && code !== undefined) {
+            try {
+                socket.close(code, reason);
+            } catch {
+                // The reconnect timer below is authoritative even if close() itself fails.
+            }
+        }
+        this.scheduleReconnect();
     }
 
     private stopHeartbeat(): void {

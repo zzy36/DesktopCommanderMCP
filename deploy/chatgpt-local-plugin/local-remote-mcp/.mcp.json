@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "local_remote_mcp": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${PLUGIN_ROOT}/server/launcher.mjs"],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}

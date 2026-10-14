@@ -13,11 +13,7 @@ export class FleetRouter {
 
     constructor(devices: DeviceBinding[], projects: ProjectBinding[]) {
         for (const device of devices) {
-            const hostname = canonicalHostname(device.hostname);
-            if (this.devices.has(hostname)) {
-                throw new Error(`duplicate device binding for ${hostname}`);
-            }
-            this.devices.set(hostname, { ...device, hostname });
+            this.addDeviceBinding(device);
         }
 
         for (const project of projects) {
@@ -29,6 +25,20 @@ export class FleetRouter {
                 hostname: canonicalHostname(project.hostname),
             });
         }
+    }
+
+    addDeviceBinding(device: DeviceBinding): DeviceBinding {
+        const hostname = canonicalHostname(device.hostname);
+        const normalized = { ...device, hostname };
+        const existing = this.devices.get(hostname);
+        if (existing) {
+            if (existing.publicKeyFingerprint !== normalized.publicKeyFingerprint) {
+                throw new Error(`device binding already exists with a different identity for ${hostname}`);
+            }
+            return existing;
+        }
+        this.devices.set(hostname, normalized);
+        return normalized;
     }
 
     registerAgent(input: AgentDescriptor): AgentDescriptor {

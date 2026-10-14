@@ -85,4 +85,13 @@ function session(sessionId, hostname, publicKeyFingerprint, policyRevision = POL
   assert.equal(router.resolve('network.ikuai', 'yuan').sessionId, 'yuan-2');
 }
 
+{
+  const enrolledKey = keyPair();
+  const enrolledFingerprint = fingerprintPublicKey(enrolledKey.publicPem);
+  const router = makeRouter();
+  router.addDeviceBinding({ hostname: 'NEWBOX', publicKeyFingerprint: enrolledFingerprint });
+  router.registerAgent(session('newbox-1', 'NEWBOX', enrolledFingerprint));
+  expectCode('PROJECT_DEVICE_DENIED', () => router.resolve('network.ikuai', 'NEWBOX'));
+  expectCode('PROJECT_DEVICE_DENIED', () => router.resolve('unassigned.project', 'NEWBOX'));
+}
 console.log('fleet router tests passed');

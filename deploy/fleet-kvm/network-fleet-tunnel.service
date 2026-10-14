@@ -1,0 +1,35 @@
+[Unit]
+Description=OpenAI Secure MCP Tunnel for Network Fleet
+After=network-online.target network-fleet-gateway.service
+Wants=network-online.target
+Requires=network-fleet-gateway.service
+ConditionPathExists=/etc/network-fleet/tunnel.env
+ConditionPathExists=/etc/network-fleet/tunnel-profiles/network-fleet.yaml
+ConditionPathExists=/etc/network-fleet/mcp-authorization
+
+[Service]
+Type=simple
+User=network-fleet
+Group=network-fleet
+EnvironmentFile=/etc/network-fleet/tunnel.env
+Environment=TUNNEL_CLIENT_PROFILE_DIR=/etc/network-fleet/tunnel-profiles
+Environment=TUNNEL_CLIENT_STATE_DIR=/var/lib/network-fleet/tunnel-state
+ExecStart=/usr/local/bin/tunnel-client run --profile network-fleet
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/network-fleet/tunnel-state
+
+[Install]
+WantedBy=multi-user.target
+

@@ -5,7 +5,7 @@ import { canonicalHostname } from './identity.js';
 export interface FleetPluginProbeBinding {
     projectId: string;
     hostname: string;
-    path: string;
+    path?: string;
 }
 
 export interface FleetGatewayPluginBackendOptions {
@@ -30,7 +30,7 @@ export class FleetGatewayPluginBackend implements FleetPluginBackend {
                 ...probe,
                 hostname: canonicalHostname(probe.hostname),
             };
-            if (!normalized.projectId || !normalized.path) throw new Error('probe binding requires projectId and path');
+            if (!normalized.projectId) throw new Error('probe binding requires projectId');
             const key = this.key(normalized.projectId, normalized.hostname);
             if (this.probes.has(key)) throw new Error(`duplicate Fleet Plugin probe binding: ${key}`);
             this.probes.set(key, normalized);
@@ -66,7 +66,7 @@ export class FleetGatewayPluginBackend implements FleetPluginBackend {
             projectId,
             probe.hostname,
             'read_file',
-            { path: probe.path },
+            probe.path ? { path: probe.path } : {},
             this.callTimeoutMs,
         );
         return firstText(result);
@@ -88,7 +88,7 @@ export class FleetGatewayPluginBackend implements FleetPluginBackend {
             projectId,
             probe.hostname,
             'write_file',
-            { path: probe.path, content, mode: 'rewrite' },
+            probe.path ? { path: probe.path, content, mode: 'rewrite' } : { content, mode: 'rewrite' },
             this.callTimeoutMs,
         );
         return { bytesWritten };
