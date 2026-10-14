@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "local-remote-mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Primary Local Remote MCP for project-authorized file, search and terminal control. Global routing may use the hosted Official Remote MCP only after a confirmed same-target Local runtime/startup/transport failure.",
   "keywords": [
     "mcp",
@@ -23,7 +23,7 @@
           "Read",
           "Write"
         ],
-        "brandColor": "#14B8A6",
+        "brandColor": "#2563EB",
         "composerIcon": "./assets/local-remote-mcp.svg",
         "logo": "./assets/local-remote-mcp.svg"
       }

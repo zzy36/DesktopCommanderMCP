@@ -1,6 +1,6 @@
 {
   "name": "local-remote-mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Primary Local Remote MCP with L1-governed same-target Official fallback only after confirmed Local runtime/startup/transport failure.",
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
@@ -11,7 +11,7 @@
     "longDescription": "Local-first MCP with .control authorization. Official fallback is same-project/same-D0 and only for confirmed Local runtime/startup/transport failure.",
     "developerName": "Local Control Plane",
     "category": "Developer Tools",
-    "brandColor": "#14B8A6",
+    "brandColor": "#2563EB",
     "composerIcon": "./assets/local-remote-mcp.svg",
     "logo": "./assets/local-remote-mcp.svg"
   }
