@@ -4,12 +4,12 @@ This document describes the isolated deployment shape for the self-hosted Networ
 
 ## Migration state
 
-Two independent control planes must coexist until explicit cutover approval:
+Two independent control planes coexist:
 
-- **Official remote MCP**: the currently installed Remote Desktop Commander service. It remains enabled and unchanged while Network Fleet is tested.
-- **Local remote MCP**: this self-hosted Fleet Gateway + Fleet Agent path. It is test-only until the acceptance matrix is complete.
+- **Local remote MCP** is the primary/default transport. ChatGPT Desktop uses the local stdio plugin; remote surfaces use the Fleet Gateway path once Secure MCP Tunnel is provisioned.
+- **Official remote MCP** remains installed and connected as the automatic same-project/same-D0 fallback for eligible Local runtime/startup/transport/capability failures. Authorization/security denials never trigger fallback.
 
-Do not disable, replace, reconfigure, or route around the official remote MCP as part of the prototype deployment.
+Do not disable or remove the official remote MCP as part of normal Local deployment.
 
 ## Current construction-tool boundary
 
@@ -37,9 +37,11 @@ ChatGPT custom MCP
 | Fleet Gateway                |
 |   MCP:   127.0.0.1:8787      |
 |   Agent: 127.0.0.1:8788      |
+|   Admin: 127.0.0.1:8789      |
 |                              |
 | Caddy / LAN TLS ingress      |
-|   :9443 -> 127.0.0.1:8788    |
+|   :9443 /agent -> :8788      |
+|   :9443 /admin -> :8789      |
 +---------------+--------------+
                 |
                 | WSS on trusted LAN only
@@ -54,6 +56,8 @@ ChatGPT custom MCP
 ```
 
 The MCP and Agent ingress are deliberately separate listeners. The MCP listener stays loopback-only. The Agent listener is not exposed directly; a local reverse proxy provides WSS on the LAN side.
+
+The optional Web Admin is also loopback-only behind Caddy. It is a LAN diagnostics/onboarding surface only: device status, project routing, redacted recent-call metadata and bootstrap guidance. It intentionally exposes no filesystem, shell, process or MCP execution endpoint, so losing the Web UI cannot weaken `.control` enforcement.
 
 ## Trust boundaries
 
@@ -109,15 +113,15 @@ Do not fill them from stale chat history. Read them from the live Agent provisio
 
 ## Agent provisioning
 
-On each Windows host, build first and print the durable identity before registering it at the Gateway:
+Managed Windows devices should use the canonical L1 bootstrap instead of cloning this project manually:
 
 ```powershell
-node dist/remote-device/fleet/agent-main.js --config C:\ProgramData\NetworkFleet\agent.json --print-provisioning
+pwsh -NoProfile -File <CONTROL_ROOT>\tools\Register-LocalRemoteMcpDevice.ps1 -Json
 ```
 
-The output provides the canonical hostname, Ed25519 public-key fingerprint, current policy revision, discovered `.control` root, and state directory.
+The first pass installs/updates the shared Local Remote MCP runtime and plugin, provisions the CA and Agent identity/config, and returns the canonical hostname, Ed25519 public-key fingerprint and current policy revision. After that identity is approved in the Gateway, rerun with `-InstallTask -StartNow` to register the PowerShell 7 SYSTEM startup task.
 
-The permanent Agent service must use the exact host-specific config. Do not route `network.ikuai` to HEMA when YUAN is offline.
+The permanent Agent uses the exact host-specific identity and `.control` authorization. A Local or Official transport failure never permits routing to a different D0 device.
 
 ## Acceptance gate before cutover
 
@@ -138,4 +142,4 @@ The local remote MCP is not a replacement until all of these pass:
 - audit log confirms arguments, file contents, secrets, and result bodies are not copied into logs;
 - dependency/security review and version pinning completed.
 
-Only after explicit user approval should the official remote MCP be disabled.
+Official Remote MCP remains installed as fallback after Local becomes primary. Disabling or removing it is a separate future action requiring explicit user approval.

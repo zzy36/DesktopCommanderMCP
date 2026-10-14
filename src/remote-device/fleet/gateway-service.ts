@@ -4,6 +4,7 @@ import type { Duplex } from 'node:stream';
 import path from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import { JsonlAuditSink } from './audit-log.js';
+import { createFleetAdminHttpServer } from './admin-server.js';
 import { FleetGateway, FleetGatewaySocket } from './fleet-gateway.js';
 import { FleetGatewayPluginBackend } from './gateway-plugin-backend.js';
 import { FileGenerationStore } from './gateway-state.js';
@@ -16,6 +17,7 @@ export interface RunningFleetGatewayService {
     gateway: FleetGateway;
     mcpAddress(): ReturnType<Server['address']>;
     agentAddress(): ReturnType<Server['address']>;
+    adminAddress(): ReturnType<Server['address']> | null;
     close(): Promise<void>;
 }
 
@@ -45,6 +47,13 @@ export async function startFleetGatewayService(
 
     const mcpServer = createMcpServer(config, backend, env);
     const agentServer = createAgentHttpServer(config);
+    const adminServer = config.adminListenPort !== undefined && config.adminListenHost && config.adminBasePath
+        ? createFleetAdminHttpServer(gateway, {
+            basePath: config.adminBasePath,
+            devices: config.devices,
+            projects: config.projects,
+        })
+        : null;
     const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 
     wss.on('connection', (socket) => {
@@ -75,8 +84,13 @@ export async function startFleetGatewayService(
     await listen(mcpServer, config.mcpListenPort, config.mcpListenHost);
     try {
         await listen(agentServer, config.agentListenPort, config.agentListenHost);
+        if (adminServer && config.adminListenPort !== undefined && config.adminListenHost) {
+            await listen(adminServer, config.adminListenPort, config.adminListenHost);
+        }
     } catch (error) {
         await closeServer(mcpServer).catch(() => undefined);
+        await closeServer(agentServer).catch(() => undefined);
+        if (adminServer) await closeServer(adminServer).catch(() => undefined);
         throw error;
     }
 
@@ -85,6 +99,7 @@ export async function startFleetGatewayService(
         gateway,
         mcpAddress: () => mcpServer.address(),
         agentAddress: () => agentServer.address(),
+        adminAddress: () => adminServer?.address() ?? null,
         close: async () => {
             if (closed) return;
             closed = true;
@@ -94,6 +109,7 @@ export async function startFleetGatewayService(
             await Promise.all([
                 closeServer(mcpServer),
                 closeServer(agentServer),
+                adminServer ? closeServer(adminServer) : Promise.resolve(),
             ]);
         },
     };

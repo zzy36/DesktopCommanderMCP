@@ -56,6 +56,12 @@ const GatewayOAuthAuthSchema = z.object({
     ownerPasswordHashEnv: z.string().min(1).default('FLEET_OWNER_PASSWORD_HASH'),
 }).strict();
 
+const GatewayAdminSchema = z.object({
+    listenHost: z.string().min(1).default('127.0.0.1'),
+    listenPort: ListenPort,
+    basePath: z.string().min(1).default('/admin'),
+}).strict();
+
 const GatewayConfigSchema = z.object({
     schemaVersion: z.literal(1),
     mcp: z.object({
@@ -68,6 +74,7 @@ const GatewayConfigSchema = z.object({
         listenPort: ListenPort,
         path: z.string().min(1).default('/agent'),
     }).strict(),
+    admin: GatewayAdminSchema.optional(),
     stateDir: z.string().min(1),
     devices: z.array(DeviceBindingSchema).min(1),
     projects: z.array(ProjectBindingSchema).min(1),
@@ -100,6 +107,9 @@ export interface ResolvedGatewayServiceConfig {
     agentListenHost: string;
     agentListenPort: number;
     agentPath: string;
+    adminListenHost?: string;
+    adminListenPort?: number;
+    adminBasePath?: string;
     stateDir: string;
     devices: Array<{ hostname: string; publicKeyFingerprint: string }>;
     projects: Array<{ projectId: string; hostname: string; policyRevision: string }>;
@@ -163,6 +173,20 @@ export async function loadGatewayServiceConfig(
     ) {
         throw new Error('MCP and Agent listeners must use distinct host/port bindings');
     }
+    if (raw.admin) {
+        if (!raw.admin.basePath.startsWith('/') || raw.admin.basePath === '/' || raw.admin.basePath.includes('?') || raw.admin.basePath.includes('#')) {
+            throw new Error('admin.basePath must be a non-root absolute URL path without query or fragment');
+        }
+        const conflicts = [
+            [raw.mcp.listenHost, raw.mcp.listenPort, 'MCP'],
+            [raw.agent.listenHost, raw.agent.listenPort, 'Agent'],
+        ] as const;
+        for (const [host, port, label] of conflicts) {
+            if (raw.admin.listenPort !== 0 && raw.admin.listenHost === host && raw.admin.listenPort === port) {
+                throw new Error(`Admin and ${label} listeners must use distinct host/port bindings`);
+            }
+        }
+    }
 
     const devices = raw.devices.map((device) => ({
         hostname: canonicalHostname(device.hostname),
@@ -217,6 +241,9 @@ export async function loadGatewayServiceConfig(
         agentListenHost: raw.agent.listenHost,
         agentListenPort: raw.agent.listenPort,
         agentPath: raw.agent.path,
+        adminListenHost: raw.admin?.listenHost,
+        adminListenPort: raw.admin?.listenPort,
+        adminBasePath: raw.admin?.basePath,
         stateDir: path.resolve(raw.stateDir),
         devices,
         projects,

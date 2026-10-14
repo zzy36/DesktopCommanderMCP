@@ -22,6 +22,12 @@ export async function runFleetGatewayCli(argv = process.argv.slice(2), env = pro
             path: config.agentPath,
             address: service.agentAddress(),
         },
+        admin: config.adminListenPort !== undefined ? {
+            listenHost: config.adminListenHost,
+            listenPort: config.adminListenPort,
+            basePath: config.adminBasePath,
+            address: service.adminAddress(),
+        } : null,
         started: true,
     })}\n`);
 

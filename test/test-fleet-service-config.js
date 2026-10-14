@@ -27,6 +27,11 @@ try {
       listenPort: 8788,
       path: '/agent',
     },
+    admin: {
+      listenHost: '127.0.0.1',
+      listenPort: 8789,
+      basePath: '/admin',
+    },
     stateDir: join(root, 'state'),
     devices: [{ hostname: 'YUAN', publicKeyFingerprint: `sha256:${'0'.repeat(64)}` }],
     projects: [{ projectId: 'network.ikuai', hostname: 'YUAN', policyRevision: 'control@000000000000' }],
@@ -39,6 +44,8 @@ try {
   assert.equal(gateway.mcpListenHost, '127.0.0.1');
   assert.equal(gateway.mcpListenPort, 8787);
   assert.equal(gateway.agentListenPort, 8788);
+  assert.equal(gateway.adminListenPort, 8789);
+  assert.equal(gateway.adminBasePath, '/admin');
   assert.equal(gateway.mcpAuth.type, 'bearer');
 
   await writeFile(gatewayPath, JSON.stringify({
@@ -52,6 +59,18 @@ try {
     agent: { ...baseGateway.agent, path: '/mcp' },
   }));
   await assert.rejects(loadGatewayServiceConfig(gatewayPath, {}), /distinct from the MCP endpoint/);
+
+  await writeFile(gatewayPath, JSON.stringify({
+    ...baseGateway,
+    admin: { ...baseGateway.admin, listenPort: 8788 },
+  }));
+  await assert.rejects(loadGatewayServiceConfig(gatewayPath, {}), /Admin and Agent listeners must use distinct/);
+
+  await writeFile(gatewayPath, JSON.stringify({
+    ...baseGateway,
+    admin: { ...baseGateway.admin, basePath: '/' },
+  }));
+  await assert.rejects(loadGatewayServiceConfig(gatewayPath, {}), /admin.basePath must be a non-root/);
 
   await writeFile(gatewayPath, JSON.stringify({
     ...baseGateway,
