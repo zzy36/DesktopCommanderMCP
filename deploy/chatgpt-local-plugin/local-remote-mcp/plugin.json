@@ -1,19 +1,31 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "local-remote-mcp",
-  "version": "0.2.0",
-  "description": "Primary Local Remote MCP for project-authorized file, search and terminal control. Global routing may fall back to the hosted Official Remote MCP only for same-target Local availability/capability failures.",
-  "keywords": ["mcp", "remote", "desktop", "local", "project-control"],
+  "version": "0.2.1",
+  "description": "Primary Local Remote MCP for project-authorized file, search and terminal control. Global routing may use the hosted Official Remote MCP only after a confirmed same-target Local runtime/startup/transport failure.",
+  "keywords": [
+    "mcp",
+    "remote",
+    "desktop",
+    "local",
+    "project-control"
+  ],
   "extensions": {
     "com.openai": {
       "requires_local_executor": true,
       "interface": {
         "displayName": "Local Remote MCP",
         "shortDescription": "Project-scoped local machine control",
-        "longDescription": "Use Local Remote MCP as the primary machine-control path. Every local tool call is re-authorized through local .control; same-target Official fallback is governed separately by L1 routing policy.",
+        "longDescription": "Use Local Remote MCP as the primary machine-control path. Every local tool call is re-authorized through local .control; same-target Official fallback is allowed only after confirmed Local runtime/startup/transport failure under L1 policy.",
         "developerName": "Local Control Plane",
         "category": "Developer Tools",
-        "capabilities": ["Read", "Write"]
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "brandColor": "#14B8A6",
+        "composerIcon": "./assets/local-remote-mcp.svg",
+        "logo": "./assets/local-remote-mcp.svg"
       }
     }
   }
