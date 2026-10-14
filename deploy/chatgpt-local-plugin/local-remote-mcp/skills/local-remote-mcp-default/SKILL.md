@@ -1,22 +1,24 @@
 ---
 name: local-remote-mcp-default
-description: Use the self-hosted Local Remote MCP for machine, filesystem, search, terminal, and remote-control work. Trigger when the user says MCP, remote MCP, local MCP, remote machine, Desktop Commander, or asks to operate an authorized computer, unless they explicitly request Official Remote MCP.
+description: Use Local Remote MCP first for authorized machine, filesystem, search and terminal work. Trigger when the user says MCP, remote MCP, local MCP, remote machine, Desktop Commander, or asks to operate an authorized computer. Fall back to Official Remote MCP only for same-target Local availability, transport, or capability failures; never for authorization/security denials.
 ---
 
-Treat these names as distinct control planes:
+Treat these as separate control paths:
 
 - **Local Remote MCP** is the primary/default MCP path.
-- **Official Remote MCP** is the hosted Remote Desktop Commander path kept installed as a fallback.
+- **Official Remote MCP** is the hosted Remote Desktop Commander path kept enabled as fallback.
 - **Computer Use / GUI automation** is separate from both MCP transports.
 
-When the user says "MCP", "remote MCP", "远程 MCP", or otherwise asks for MCP-based computer control without naming a provider, use the `local_remote_mcp` server from this plugin. Do not silently call the Official Remote MCP.
+For an unqualified MCP/remote-control request, first resolve the exact active L3 `project_id` and its fixed D0 target from `.control`. Do not choose a transport before the project/device route is known.
 
-Use Official Remote MCP only when the user explicitly says "Official Remote MCP", "官方远程 MCP", or explicitly approves falling back to it after Local Remote MCP is unavailable. Keeping Official Remote MCP installed does not make it the default.
+Use the `local_remote_mcp` server first. Every Local tool call must include the exact active L3 `project_id`. Never invent, substitute, or rebind a project or device.
 
-Every Local Remote MCP tool call must include the exact active L3 `project_id`. Do not invent, substitute, or auto-fallback to a different project or device. A `PROJECT_DEVICE_DENIED` result is a hard boundary, not a reason to retry another project or host.
+Automatic fallback to Official Remote MCP is allowed only when Local cannot serve the already-authorized same target because the Local plugin/runtime is unavailable, its transport/startup fails, or the required capability is not exposed locally. The fallback must keep the same `project_id` and same D0 hostname/device. Official account/link selection is only an R0 transport choice after D0 is fixed.
 
-Local Remote MCP re-authorizes every call through the machine's `.control` policy. Filesystem and search paths are restricted to the authorized `physical_root`; terminal sessions start in that root. Follow the active project's AGENTS/CURRENT/HANDOFF and Git state for project facts.
+Do **not** fall back on policy/security/identity errors such as `PROJECT_DEVICE_DENIED`, `POLICY_SKEW`, `IDENTITY_MISMATCH`, `TARGET_AMBIGUOUS`, path-scope denial, or an approval denial. Those are hard boundaries and must be surfaced instead of bypassed.
 
-Prefer Local Remote MCP for file inspection/editing, searches, terminal commands, and project-scoped process sessions. Use Computer Use only when the task specifically requires GUI/browser/mouse/keyboard interaction.
+Local Remote MCP re-authorizes every call through the machine's `.control` policy. Filesystem/search paths are restricted to the authorized `physical_root`; terminal sessions start in that root. Follow the active project's AGENTS/CURRENT/HANDOFF and Git state for project facts.
 
-If this desktop-only plugin is unavailable on the current surface, say that the Local Remote MCP desktop path is unavailable here. Do not silently consume Official Remote MCP as a substitute. The KVM + Secure MCP Tunnel path is the intended remote/web/mobile transport once its OpenAI account-side Tunnel connection is provisioned.
+Prefer Local Remote MCP for file inspection/editing, searches, terminal commands and project-scoped process sessions. Use Computer Use only when the task specifically requires GUI/browser/mouse/keyboard interaction.
+
+On web/mobile/iPad, prefer the self-hosted Secure MCP Tunnel path when available. If that Local path is unavailable, the same fallback rule applies: Official Remote MCP may be used automatically only for the same fixed D0/project and only for Local availability/transport/capability failure, never to evade a Local authorization denial.

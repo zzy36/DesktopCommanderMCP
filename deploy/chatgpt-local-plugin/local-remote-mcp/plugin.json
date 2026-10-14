@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "local-remote-mcp",
-  "version": "0.1.0",
-  "description": "Primary local Remote MCP for project-authorized file, search and terminal control. Keeps the hosted Official Remote MCP separate as an explicit fallback only.",
+  "version": "0.2.0",
+  "description": "Primary Local Remote MCP for project-authorized file, search and terminal control. Global routing may fall back to the hosted Official Remote MCP only for same-target Local availability/capability failures.",
   "keywords": ["mcp", "remote", "desktop", "local", "project-control"],
   "extensions": {
     "com.openai": {
@@ -10,8 +10,8 @@
       "interface": {
         "displayName": "Local Remote MCP",
         "shortDescription": "Project-scoped local machine control",
-        "longDescription": "Use the self-hosted Local Remote MCP as the primary machine-control path. Every tool call is re-authorized through local .control before execution.",
-        "developerName": "Local Network Fleet",
+        "longDescription": "Use Local Remote MCP as the primary machine-control path. Every local tool call is re-authorized through local .control; same-target Official fallback is governed separately by L1 routing policy.",
+        "developerName": "Local Control Plane",
         "category": "Developer Tools",
         "capabilities": ["Read", "Write"]
       }
