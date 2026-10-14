@@ -361,6 +361,48 @@ export class FleetGateway {
         return [this.deviceStatus(projectId, project.hostname)];
     }
 
+    addDeviceBinding(device: DeviceBinding): DeviceBinding {
+        const hostname = canonicalHostname(device.hostname);
+        const normalized = { ...device, hostname };
+        const existing = this.devices.get(hostname);
+        if (existing) {
+            if (existing.publicKeyFingerprint !== normalized.publicKeyFingerprint) {
+                throw new FleetGatewayError(
+                    'IDENTITY_MISMATCH',
+                    `device ${hostname} is already pinned to a different identity`,
+                    { hostname },
+                );
+            }
+            return { ...existing };
+        }
+        this.router.addDeviceBinding(normalized);
+        this.devices.set(hostname, normalized);
+        return { ...normalized };
+    }
+
+    listKnownDeviceStatuses(): Array<FleetGatewayDeviceStatus & { publicKeyFingerprint: string }> {
+        return [...this.devices.values()].map((device) => {
+            const session = this.activeByHost.get(device.hostname);
+            const expectedPolicy = this.expectedPolicyByHost.get(device.hostname);
+            const online = Boolean(
+                session
+                && session.authenticated
+                && session.socket.readyState === SOCKET_OPEN
+                && (!expectedPolicy || session.policyRevision === expectedPolicy),
+            );
+            return {
+                hostname: device.hostname,
+                publicKeyFingerprint: device.publicKeyFingerprint,
+                online,
+                sessionId: online ? session!.sessionId : null,
+                generation: online ? session!.generation : null,
+                policyRevision: session?.policyRevision ?? null,
+                connectedAtMs: session?.connectedAtMs ?? null,
+                lastSeenAtMs: session?.lastSeenAtMs ?? null,
+            };
+        });
+    }
+
     async stop(): Promise<void> {
         if (this.stopped) return;
         this.stopped = true;
@@ -427,10 +469,10 @@ export class FleetGateway {
             throw new FleetGatewayError('IDENTITY_MISMATCH', `agent identity does not match pinned identity for ${hostname}`);
         }
         const expectedPolicy = this.expectedPolicyByHost.get(hostname);
-        if (!expectedPolicy || expectedPolicy !== policyRevision) {
+        if (expectedPolicy && expectedPolicy !== policyRevision) {
             throw new FleetGatewayError('POLICY_SKEW', `agent policy revision does not match gateway policy for ${hostname}`, {
                 hostname,
-                expectedPolicy: expectedPolicy ?? null,
+                expectedPolicy,
                 agentPolicy: policyRevision,
             });
         }

@@ -1,14 +1,20 @@
-# Replace fleet-mcp.home.arpa with the final LAN-only hostname.
-# The certificate must be trusted by YUAN/HEMA and must match this hostname.
-# This listener exposes only the Fleet Agent WebSocket path to the LAN.
+# LAN-only ingress for the self-hosted Local Remote MCP control plane.
+# Current trusted household subnet is 172.16.0.0/20. VPN ranges are intentionally excluded.
+# The certificate must be trusted by managed devices and match fleet-mcp.home.arpa.
 
 fleet-mcp.home.arpa:9443 {
     tls /etc/network-fleet/tls/fullchain.pem /etc/network-fleet/tls/privkey.pem
 
-    @agent path /agent
+    @agent {
+        path /agent
+        remote_ip 172.16.0.0/20
+    }
     reverse_proxy @agent 127.0.0.1:8788
 
-    @admin path /admin /admin/*
+    @admin {
+        path /admin /admin/* /pair/claim /pair/status
+        remote_ip 172.16.0.0/20
+    }
     reverse_proxy @admin 127.0.0.1:8789
 
     respond 404

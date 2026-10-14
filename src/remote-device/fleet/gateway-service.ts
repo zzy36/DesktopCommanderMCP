@@ -7,6 +7,7 @@ import { JsonlAuditSink } from './audit-log.js';
 import { createFleetAdminHttpServer } from './admin-server.js';
 import { FleetGateway, FleetGatewaySocket } from './fleet-gateway.js';
 import { FleetGatewayPluginBackend } from './gateway-plugin-backend.js';
+import { FleetEnrollmentStore } from './enrollment-store.js';
 import { FileGenerationStore } from './gateway-state.js';
 import { createFleetOAuthPluginHttpServer } from './oauth-plugin-server.js';
 import { createFleetPluginHttpServer } from './plugin-server.js';
@@ -26,9 +27,12 @@ export async function startFleetGatewayService(
     env: NodeJS.ProcessEnv = process.env,
 ): Promise<RunningFleetGatewayService> {
     await mkdir(config.stateDir, { recursive: true });
+    const enrollmentStore = new FleetEnrollmentStore(path.join(config.stateDir, 'enrollment.json'));
+    await enrollmentStore.initialize();
+    const devices = mergeDeviceBindings(config.devices, enrollmentStore.listApprovedDevices());
 
     const gateway = new FleetGateway({
-        devices: config.devices,
+        devices,
         projects: config.projects,
         generationStore: new FileGenerationStore(path.join(config.stateDir, 'generations.json')),
         audit: new JsonlAuditSink(path.join(config.stateDir, 'audit.jsonl')),
@@ -50,8 +54,9 @@ export async function startFleetGatewayService(
     const adminServer = config.adminListenPort !== undefined && config.adminListenHost && config.adminBasePath
         ? createFleetAdminHttpServer(gateway, {
             basePath: config.adminBasePath,
-            devices: config.devices,
             projects: config.projects,
+            enrollmentStore,
+            onApproveDevice: (device) => { gateway.addDeviceBinding(device); },
         })
         : null;
     const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
@@ -190,6 +195,21 @@ function sendJson(res: ServerResponse, status: number, value: unknown): void {
     res.setHeader('content-type', 'application/json; charset=utf-8');
     res.setHeader('content-length', Buffer.byteLength(body));
     res.end(body);
+}
+
+function mergeDeviceBindings(
+    configured: Array<{ hostname: string; publicKeyFingerprint: string }>,
+    enrolled: Array<{ hostname: string; publicKeyFingerprint: string }>,
+): Array<{ hostname: string; publicKeyFingerprint: string }> {
+    const merged = new Map(configured.map((device) => [device.hostname, { ...device }]));
+    for (const device of enrolled) {
+        const existing = merged.get(device.hostname);
+        if (existing && existing.publicKeyFingerprint !== device.publicKeyFingerprint) {
+            throw new Error(`enrolled device ${device.hostname} conflicts with configured identity`);
+        }
+        if (!existing) merged.set(device.hostname, { ...device });
+    }
+    return [...merged.values()];
 }
 
 function adaptWebSocket(socket: WebSocket): FleetGatewaySocket {
