@@ -3,6 +3,9 @@ Description=OpenAI Secure MCP Tunnel for Network Fleet
 After=network-online.target network-fleet-gateway.service
 Wants=network-online.target
 Requires=network-fleet-gateway.service
+ConditionPathExists=/etc/network-fleet/tunnel.env
+ConditionPathExists=/etc/network-fleet/tunnel-profiles/network-fleet.yaml
+ConditionPathExists=/etc/network-fleet/mcp-authorization
 
 [Service]
 Type=simple
@@ -29,3 +32,4 @@ ReadWritePaths=/var/lib/network-fleet/tunnel-state
 
 [Install]
 WantedBy=multi-user.target
+
