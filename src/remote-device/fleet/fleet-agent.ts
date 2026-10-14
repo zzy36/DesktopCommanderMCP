@@ -124,25 +124,37 @@ export class FleetAgent {
         if (this.policyTimer) clearInterval(this.policyTimer);
         const watchMs = this.options.policyWatchMs ?? 5_000;
         this.policyTimer = setInterval(() => {
-            void this.refreshPolicyRevision();
+            void this.refreshPolicyRevision().catch(() => undefined);
         }, watchMs);
     }
 
     private async refreshPolicyRevision(): Promise<void> {
         if (!this.started) return;
         if (!this.refreshPromise) {
-            this.refreshPromise = this.refreshPolicyRevisionOnce().finally(() => {
-                this.refreshPromise = null;
-            });
+            this.refreshPromise = this.refreshPolicyRevisionOnce()
+                .catch(async (error) => {
+                    await this.suspendChannel();
+                    throw error;
+                })
+                .finally(() => {
+                    this.refreshPromise = null;
+                });
         }
         await this.refreshPromise;
     }
 
     private async refreshPolicyRevisionOnce(): Promise<void> {
         const revision = await this.authorizer.policyRevision();
-        if (!this.started || revision === this.policyRevision) return;
+        if (!this.started) return;
+        if (revision === this.policyRevision && this.channel) return;
         this.policyRevision = revision;
         await this.replaceChannel(revision);
+    }
+
+    private async suspendChannel(): Promise<void> {
+        const channel = this.channel;
+        this.channel = null;
+        await channel?.stop().catch(() => undefined);
     }
 
     private async replaceChannel(revision: string): Promise<void> {
