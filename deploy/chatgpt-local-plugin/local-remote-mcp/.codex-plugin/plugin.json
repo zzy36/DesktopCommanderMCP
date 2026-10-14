@@ -1,0 +1,15 @@
+{
+  "name": "local-remote-mcp",
+  "version": "0.1.0",
+  "description": "Primary local Remote MCP; Official Remote MCP remains explicit fallback only.",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "requires_local_executor": true,
+  "interface": {
+    "displayName": "Local Remote MCP",
+    "shortDescription": "Project-scoped local machine control",
+    "longDescription": "Self-hosted local MCP path with .control authorization.",
+    "developerName": "Local Network Fleet",
+    "category": "Developer Tools"
+  }
+}
