@@ -120,7 +120,8 @@ function bootstrapGuide() {
             'Validate one allowed project and one denied project. Official Remote MCP remains same-project/same-D0 fallback only.',
         ],
         commands: {
-            existingManagedDevice: 'pwsh -NoProfile -File "<CONTROL_ROOT>\\tools\\Register-LocalRemoteMcpDevice.ps1" -Json -InstallTask -StartNow',
+            pairingBootstrap: 'pwsh -NoProfile -File "<CONTROL_ROOT>\\tools\\Register-LocalRemoteMcpDevice.ps1" -PairingCode "<PAIR_CODE>" -Json -InstallTask -StartNow',
+            existingApprovedDevice: 'pwsh -NoProfile -File "<CONTROL_ROOT>\\tools\\Register-LocalRemoteMcpDevice.ps1" -Json -InstallTask -StartNow',
             validateR0: 'pwsh -NoProfile -File "<CONTROL_ROOT>\\tools\\Validate-R0DesktopProfile.ps1"',
         },
         note: 'No account database is required. Pairing is device identity admission only; it never grants project permissions or bypasses .control.',

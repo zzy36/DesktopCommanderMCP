@@ -35,7 +35,9 @@ try {
   response = await fetch(`${base}/api/bootstrap`);
   assert.equal(response.status, 200);
   const bootstrap = await response.json();
-  assert.match(bootstrap.commands.existingManagedDevice, /Register-LocalRemoteMcpDevice\.ps1/);
+  assert.match(bootstrap.commands.pairingBootstrap, /Register-LocalRemoteMcpDevice\.ps1/);
+  assert.match(bootstrap.commands.pairingBootstrap, /-PairingCode/);
+  assert.match(bootstrap.commands.existingApprovedDevice, /Register-LocalRemoteMcpDevice\.ps1/);
   assert.match(bootstrap.note, /No account database is required/i);
 
   response = await fetch(`${base}/api/calls?limit=9999`);
