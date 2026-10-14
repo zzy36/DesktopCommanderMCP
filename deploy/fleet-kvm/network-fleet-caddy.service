@@ -1,0 +1,27 @@
+[Unit]
+Description=Network Fleet TLS ingress
+After=network-online.target network-fleet-gateway.service
+Wants=network-online.target network-fleet-gateway.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/caddy run --config /etc/network-fleet/Caddyfile --adapter caddyfile
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+ReadOnlyPaths=/etc/network-fleet
+
+[Install]
+WantedBy=multi-user.target
