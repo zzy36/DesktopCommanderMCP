@@ -24,7 +24,7 @@ const client = new Client({ name: 'local-control-mcp-launcher-test', version: '0
 try {
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 16);
+  assert.equal(tools.tools.length, 20);
   const result = await client.callTool({
     name: 'read_file',
     arguments: { project_id: 'network.local-control-mcp', path: 'AGENTS.md', offset: 0, length: 3 },

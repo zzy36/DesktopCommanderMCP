@@ -24,12 +24,18 @@ function text(result) {
 try {
   const listed = await client.listTools();
   const names = listed.tools.map((tool) => tool.name).sort();
-  assert.equal(names.length, 16);
+  assert.equal(names.length, 20);
   assert(names.includes('read_file'));
   assert(names.includes('write_file'));
   assert(names.includes('start_process'));
+  assert(names.includes('list_sessions'));
+  assert(names.includes('list_searches'));
+  assert(names.includes('kill_process'));
+  assert(names.includes('get_config'));
   assert(!names.includes('set_config_value'));
   assert(!names.includes('get_recent_tool_calls'));
+  assert(!names.includes('list_processes'));
+  assert(!names.includes('set_config_value'));
   for (const tool of listed.tools) {
     assert(tool.inputSchema?.properties?.project_id, `${tool.name} missing project_id`);
     assert(tool.inputSchema?.required?.includes('project_id'), `${tool.name} project_id not required`);
@@ -62,6 +68,23 @@ try {
   assert.equal(result.isError, true);
   assert.match(text(result), /PROJECT_DEVICE_DENIED/);
 
+  result = await client.callTool({
+    name: 'get_config',
+    arguments: { project_id: projectId },
+  });
+  assert.equal(result.isError, undefined);
+  const configText = text(result);
+  assert.match(configText, /Local Control MCP/);
+  assert.match(configText, /network\.local-control-mcp/);
+  assert(!/clientHistory/.test(configText));
+  assert(!/allowedDirectories/.test(configText));
+
+  result = await client.callTool({
+    name: 'kill_process',
+    arguments: { project_id: projectId, pid: 1 },
+  });
+  assert.equal(result.isError, true);
+  assert.match(text(result), /PROJECT_DEVICE_DENIED/);
   result = await client.callTool({
     name: 'start_process',
     arguments: { project_id: projectId, command: "Write-Output ('ROOT=' + (Get-Location).Path); Write-Output 'LOCAL_PLUGIN_PROCESS_OK'", timeout_ms: 3000 },

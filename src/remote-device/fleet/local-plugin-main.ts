@@ -19,6 +19,7 @@ const EXPOSED_TOOLS = new Set([
   'create_directory', 'list_directory', 'move_file', 'get_file_info', 'edit_block',
   'start_search', 'get_more_search_results', 'stop_search',
   'start_process', 'read_process_output', 'interact_with_process', 'force_terminate',
+  'list_sessions', 'list_searches', 'kill_process', 'get_config',
 ]);
 
 const PATH_TOOLS = new Set([
@@ -178,7 +179,7 @@ function recordOwnership(toolName: string, projectId: string, result: any): void
 }
 
 function assertOwnedContinuation(toolName: string, projectId: string, args: Record<string, unknown>): void {
-  if (toolName === 'read_process_output' || toolName === 'interact_with_process' || toolName === 'force_terminate') {
+  if (toolName === 'read_process_output' || toolName === 'interact_with_process' || toolName === 'force_terminate' || toolName === 'kill_process') {
     const pid = Number(args.pid);
     if (!Number.isInteger(pid) || ownedProcesses.get(pid) !== projectId) {
       throw Object.assign(new Error(`process ${String(args.pid)} is not owned by project ${projectId} in this Local Control MCP session`), { code: 'PROJECT_DEVICE_DENIED' });
@@ -192,6 +193,47 @@ function assertOwnedContinuation(toolName: string, projectId: string, args: Reco
   }
 }
 
+function scopedInventoryResult(toolName: string, projectId: string, result: any): any {
+  if (toolName !== 'list_sessions' && toolName !== 'list_searches') return result;
+  const raw = textFromResult(result);
+  const identifiers = toolName === 'list_sessions'
+    ? [...ownedProcesses.entries()].filter(([, owner]) => owner === projectId).map(([pid]) => String(pid))
+    : [...ownedSearches.entries()].filter(([, owner]) => owner === projectId).map(([id]) => id);
+  if (identifiers.length === 0) {
+    return { content: [{ type: 'text', text: toolName === 'list_sessions' ? 'No LCM-owned terminal sessions.' : 'No LCM-owned searches.' }] };
+  }
+  const blocks = raw.split(/\r?\n\s*\r?\n/).filter((block) => identifiers.some((id) => block.includes(id)));
+  return { content: [{ type: 'text', text: blocks.length ? blocks.join('\n\n') : identifiers.join('\n') }] };
+}
+
+function sanitizedConfigResult(projectId: string, auth: ControlProjectAuthorization, result: any): any {
+  const raw = textFromResult(result);
+  let parsed: any = null;
+  try { parsed = JSON.parse(raw); } catch { /* sanitized fallback below */ }
+  const source = parsed?.config && typeof parsed.config === 'object' ? parsed.config : parsed;
+  const safe = source && typeof source === 'object' ? {
+    product: 'Local Control MCP',
+    project_id: projectId,
+    device_name: localHostname,
+    physical_root: auth.physicalRoot,
+    version: source.version,
+    defaultShell: source.defaultShell,
+    fileReadLineLimit: source.fileReadLineLimit,
+    fileWriteLineLimit: source.fileWriteLineLimit,
+    telemetryEnabled: source.telemetryEnabled,
+    blockedCommands: source.blockedCommands,
+    systemInfo: source.systemInfo ? {
+      platform: source.systemInfo.platform,
+      platformName: source.systemInfo.platformName,
+      isWindows: source.systemInfo.isWindows,
+      isLinux: source.systemInfo.isLinux,
+      isMacOS: source.systemInfo.isMacOS,
+    } : undefined,
+  } : {
+    product: 'Local Control MCP', project_id: projectId, device_name: localHostname, physical_root: auth.physicalRoot,
+  };
+  return { content: [{ type: 'text', text: JSON.stringify(safe, null, 2) }] };
+}
 async function main(): Promise<void> {
   const controlRoot = await resolveControlRoot();
   const authorizer = new ControlPolicyAuthorizer({ controlRoot });
@@ -229,7 +271,8 @@ async function main(): Promise<void> {
         physical_root: auth.physicalRoot,
       });
       recordOwnership(toolName, projectId, result);
-      return result as any;
+      if (toolName === 'get_config') return sanitizedConfigResult(projectId, auth, result);
+      return scopedInventoryResult(toolName, projectId, result) as any;
     } catch (error) {
       const code = typeof (error as any)?.code === 'string' ? `${(error as any).code}: ` : '';
       const message = error instanceof Error ? error.message : String(error);
