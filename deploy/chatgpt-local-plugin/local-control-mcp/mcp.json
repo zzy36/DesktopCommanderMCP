@@ -1,6 +1,7 @@
 {
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
   "mcpServers": {
-    "local_remote_mcp": {
+    "local_control_mcp": {
       "type": "stdio",
       "command": "node",
       "args": ["${PLUGIN_ROOT}/server/launcher.mjs"],

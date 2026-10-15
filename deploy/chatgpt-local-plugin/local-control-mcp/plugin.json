@@ -1,0 +1,32 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "local-control-mcp",
+  "version": "0.3.0",
+  "description": "Primary Local Control MCP for project-authorized file, search and terminal control. Global routing may use the hosted Official Remote MCP only after a confirmed same-target Local runtime/startup/transport failure.",
+  "keywords": [
+    "mcp",
+    "remote",
+    "desktop",
+    "local",
+    "project-control"
+  ],
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "Local Control MCP",
+        "shortDescription": "Self-hosted project-scoped machine control",
+        "longDescription": "Use Local Control MCP as the primary machine-control path. Every local tool call is re-authorized through local .control; same-target Official fallback is allowed only after confirmed Local runtime/startup/transport failure under L1 policy.",
+        "developerName": "LCM",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "brandColor": "#2563EB",
+        "composerIcon": "./assets/local-control-mcp.svg",
+        "logo": "./assets/local-control-mcp.svg"
+      }
+    }
+  }
+}

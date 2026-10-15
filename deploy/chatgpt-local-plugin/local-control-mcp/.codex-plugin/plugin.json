@@ -1,0 +1,18 @@
+{
+  "name": "local-control-mcp",
+  "version": "0.3.0",
+  "description": "Primary Local Control MCP with L1-governed same-target Official fallback only after confirmed Local runtime/startup/transport failure.",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "requires_local_executor": true,
+  "interface": {
+    "displayName": "Local Control MCP",
+    "shortDescription": "Self-hosted project-scoped machine control",
+    "longDescription": "Local-first MCP with .control authorization. Official fallback is same-project/same-D0 and only for confirmed Local runtime/startup/transport failure.",
+    "developerName": "LCM",
+    "category": "Developer Tools",
+    "brandColor": "#2563EB",
+    "composerIcon": "./assets/local-control-mcp.svg",
+    "logo": "./assets/local-control-mcp.svg"
+  }
+}

@@ -63,7 +63,7 @@ function addProjectIdSchema(tool: any): any {
     ? original.required.filter((v: unknown) => typeof v === 'string') : [];
   return {
     ...tool,
-    description: `Local Remote MCP on ${localHostname}. Requires exact active L3 project_id and re-authorizes it through local .control. ${tool.description ?? ''}`.trim(),
+    description: `Local Control MCP on ${localHostname}. Requires exact active L3 project_id and re-authorizes it through local .control. ${tool.description ?? ''}`.trim(),
     inputSchema: {
       ...original,
       type: 'object',
@@ -90,7 +90,7 @@ function scopePath(raw: unknown, root: string, label: string): string {
     throw Object.assign(new Error(`${label} must be a non-empty filesystem path`), { code: 'PROJECT_DEVICE_DENIED' });
   }
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
-    throw Object.assign(new Error(`${label} URL access is not permitted through Local Remote MCP`), { code: 'PROJECT_DEVICE_DENIED' });
+    throw Object.assign(new Error(`${label} URL access is not permitted through Local Control MCP`), { code: 'PROJECT_DEVICE_DENIED' });
   }
   const candidate = path.resolve(root, raw);
   const relative = path.relative(root, candidate);
@@ -181,13 +181,13 @@ function assertOwnedContinuation(toolName: string, projectId: string, args: Reco
   if (toolName === 'read_process_output' || toolName === 'interact_with_process' || toolName === 'force_terminate') {
     const pid = Number(args.pid);
     if (!Number.isInteger(pid) || ownedProcesses.get(pid) !== projectId) {
-      throw Object.assign(new Error(`process ${String(args.pid)} is not owned by project ${projectId} in this Local Remote MCP session`), { code: 'PROJECT_DEVICE_DENIED' });
+      throw Object.assign(new Error(`process ${String(args.pid)} is not owned by project ${projectId} in this Local Control MCP session`), { code: 'PROJECT_DEVICE_DENIED' });
     }
   }
   if (toolName === 'get_more_search_results' || toolName === 'stop_search') {
     const sessionId = typeof args.sessionId === 'string' ? args.sessionId : '';
     if (!sessionId || ownedSearches.get(sessionId) !== projectId) {
-      throw Object.assign(new Error(`search ${sessionId || '<missing>'} is not owned by project ${projectId} in this Local Remote MCP session`), { code: 'PROJECT_DEVICE_DENIED' });
+      throw Object.assign(new Error(`search ${sessionId || '<missing>'} is not owned by project ${projectId} in this Local Control MCP session`), { code: 'PROJECT_DEVICE_DENIED' });
     }
   }
 }
@@ -203,7 +203,7 @@ async function main(): Promise<void> {
   const byName = new Map(exposed.map((tool: any) => [tool.name, tool]));
 
   const server = new Server(
-    { name: 'local-remote-mcp', version: '0.1.0' },
+    { name: 'local-control-mcp', version: '0.3.0' },
     { capabilities: { tools: {} }, instructions: 'Default local remote-control path. Every call requires exact L3 project_id and is re-authorized by local .control. Official Remote MCP is not used by this server.' },
   );
 
@@ -211,7 +211,7 @@ async function main(): Promise<void> {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const toolName = request.params.name;
     if (!byName.has(toolName)) {
-      return { content: [{ type: 'text', text: `Tool ${toolName} is not exposed by Local Remote MCP` }], isError: true };
+      return { content: [{ type: 'text', text: `Tool ${toolName} is not exposed by Local Control MCP` }], isError: true };
     }
     const rawArgs = request.params.arguments && typeof request.params.arguments === 'object'
       ? request.params.arguments as Record<string, unknown> : {};
@@ -225,7 +225,7 @@ async function main(): Promise<void> {
       const args = scopeArgs(toolName, rawArgs, auth);
       const result = await desktop.callClientTool(toolName, args, {
         project_id: projectId,
-        local_remote_mcp: true,
+        local_control_mcp: true,
         physical_root: auth.physicalRoot,
       });
       recordOwnership(toolName, projectId, result);
@@ -249,6 +249,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error) => {
-  stderr('Local Remote MCP failed to start:', error instanceof Error ? error.stack ?? error.message : String(error));
+  stderr('Local Control MCP failed to start:', error instanceof Error ? error.stack ?? error.message : String(error));
   process.exitCode = 1;
 });

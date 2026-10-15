@@ -3,18 +3,18 @@ import { readFile, rm } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-const projectId = 'network.local-mcp';
-const repoRoot = 'G:\\Projects\\local-mcp';
+const projectId = 'network.local-control-mcp';
+const repoRoot = 'G:\\Projects\\local-control-mcp';
 const probeRelative = 'local-only\\mcp\\.local-plugin-probe.txt';
 const probeAbsolute = `${repoRoot}\\${probeRelative}`;
 
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: ['dist/remote-device/fleet/local-plugin-main.js'],
-  cwd: 'G:\\Projects\\local-mcp\\local-only\\mcp\\DesktopCommanderMCP',
+  cwd: 'G:\\Projects\\local-control-mcp\\local-only\\mcp\\DesktopCommanderMCP',
   stderr: 'pipe',
 });
-const client = new Client({ name: 'local-remote-mcp-test', version: '0.1.0' });
+const client = new Client({ name: 'local-control-mcp-test', version: '0.1.0' });
 await client.connect(transport);
 
 function text(result) {
@@ -40,7 +40,7 @@ try {
     arguments: { project_id: projectId, path: 'AGENTS.md', offset: 0, length: 5 },
   });
   assert.equal(result.isError, undefined);
-  assert.match(text(result), /Local Remote MCP/);
+  assert.match(text(result), /Local Control MCP/);
   result = await client.callTool({
     name: 'write_file',
     arguments: { project_id: projectId, path: probeRelative, content: 'LOCAL_PLUGIN_WRITE_OK', mode: 'rewrite' },
@@ -79,7 +79,7 @@ try {
     processText += `\n${text(result)}`;
   }
   assert.match(processText, /LOCAL_PLUGIN_PROCESS_OK/);
-  assert.match(processText, /G:\\Projects\\local-mcp/i);
+  assert.match(processText, /G:\\Projects\\local-control-mcp/i);
 
   console.log('fleet local plugin MCP tests passed');
 } finally {
