@@ -194,9 +194,15 @@ async function authorize(client, scopes, { wrongPassword = false, wrongVerifier 
   const requestId = loginUrl.searchParams.get('request_id');
   assert(requestId);
 
-  const loginPage = await fetch(loginUrl);
+  const loginPage = await fetch(loginUrl, { headers: { 'accept-language': 'zh-CN,zh;q=0.9' } });
   assert.equal(loginPage.status, 200);
-  assert.match(await loginPage.text(), /Authorize Network Fleet MCP/);
+  const loginHtml = await loginPage.text();
+  assert.match(loginHtml, /Local Control MCP/);
+  assert.match(loginHtml, /所有者密码/);
+
+  const englishLoginPage = await fetch(loginUrl, { headers: { 'accept-language': 'en-US,en;q=0.9' } });
+  assert.equal(englishLoginPage.status, 200);
+  assert.match(await englishLoginPage.text(), /Owner password/);
 
   if (wrongPassword) {
     const badLogin = await fetch(new URL('/oauth/login', issuerUrl), {

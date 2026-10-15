@@ -39,10 +39,10 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
         const requestId = typeof req.query.request_id === 'string' ? req.query.request_id : '';
         const pending = requestId ? options.provider.getPendingAuthorization(requestId) : null;
         if (!pending) {
-            res.status(400).send(renderLoginError('This authorization request is invalid or expired.'));
+            res.status(400).send(renderLoginError(prefersChinese(req) ? '此授权请求无效或已过期。' : 'This authorization request is invalid or expired.', prefersChinese(req)));
             return;
         }
-        res.status(200).send(renderLoginPage(pending.requestId, pending.clientName, pending.scopes));
+        res.status(200).send(renderLoginPage(pending.requestId, pending.clientName, pending.scopes, prefersChinese(req)));
     });
 
     app.post('/oauth/login', loginParser, async (req: Request, res: Response) => {
@@ -50,7 +50,7 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
         const requestId = typeof req.body?.request_id === 'string' ? req.body.request_id : '';
         const password = typeof req.body?.password === 'string' ? req.body.password : '';
         if (!requestId || !password) {
-            res.status(400).send(renderLoginError('Missing authorization request or password.'));
+            res.status(400).send(renderLoginError(prefersChinese(req) ? '缺少授权请求或密码。' : 'Missing authorization request or password.', prefersChinese(req)));
             return;
         }
         try {
@@ -59,8 +59,8 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
         } catch {
             const pending = options.provider.getPendingAuthorization(requestId);
             const retryForm = pending
-                ? renderLoginPage(pending.requestId, pending.clientName, pending.scopes, 'Authentication failed.')
-                : renderLoginError('Authentication failed or the authorization request expired.');
+                ? renderLoginPage(pending.requestId, pending.clientName, pending.scopes, prefersChinese(req), prefersChinese(req) ? '认证失败。' : 'Authentication failed.')
+                : renderLoginError(prefersChinese(req) ? '认证失败或授权请求已过期。' : 'Authentication failed or the authorization request expired.', prefersChinese(req));
             res.status(401).send(retryForm);
         }
     });
@@ -71,7 +71,7 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
         resourceServerUrl: resourceUrl,
         serviceDocumentationUrl: options.serviceDocumentationUrl,
         scopesSupported: [...FLEET_OAUTH_SCOPES],
-        resourceName: 'Network Fleet MCP',
+        resourceName: 'Local Control MCP',
         clientRegistrationOptions: {
             clientSecretExpirySeconds: 0,
         },
@@ -158,40 +158,52 @@ function setLoginHeaders(res: Response): void {
     res.setHeader('X-Frame-Options', 'DENY');
 }
 
+function prefersChinese(req: Request): boolean {
+    const value = String(req.headers['accept-language'] ?? '').toLowerCase();
+    return !value || value === '*' || value.includes('zh');
+}
+
 function renderLoginPage(
     requestId: string,
     clientName: string,
     scopes: string[],
+    zh: boolean,
     errorMessage?: string,
 ): string {
-    const scopeLabel = scopes.length ? scopes.join(', ') : 'No explicit scopes requested';
+    const scopeLabel = scopes.length ? scopes.join(', ') : (zh ? '未请求显式权限范围' : 'No explicit scopes requested');
+    const title = zh ? '授权 Local Control MCP' : 'Authorize Local Control MCP';
+    const clientLabel = zh ? '客户端' : 'Client';
+    const accessLabel = zh ? '请求权限' : 'Requested access';
+    const passwordLabel = zh ? '所有者密码' : 'Owner password';
+    const buttonLabel = zh ? '授权' : 'Authorize';
     return `<!doctype html>
-<html lang="en">
+<html lang="${zh ? 'zh-CN' : 'en'}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Authorize Network Fleet MCP</title>
+<title>${title}</title>
 <style>
 body{font-family:system-ui,-apple-system,sans-serif;max-width:36rem;margin:4rem auto;padding:0 1.25rem;line-height:1.45;color:#111}label{display:block;margin:.8rem 0 .35rem}input{box-sizing:border-box;width:100%;padding:.7rem;border:1px solid #777;border-radius:.35rem}button{margin-top:1rem;padding:.7rem 1rem}code{overflow-wrap:anywhere}.error{color:#a00}
 </style>
 </head>
 <body>
-<h1>Authorize Network Fleet MCP</h1>
-<p>Client: <strong>${escapeHtml(clientName)}</strong></p>
-<p>Requested access: <code>${escapeHtml(scopeLabel)}</code></p>
+<h1>Local Control MCP（LCM）</h1>
+<p>${clientLabel}：<strong>${escapeHtml(clientName)}</strong></p>
+<p>${accessLabel}：<code>${escapeHtml(scopeLabel)}</code></p>
 ${errorMessage ? `<p class="error">${escapeHtml(errorMessage)}</p>` : ''}
 <form method="post" action="/oauth/login" autocomplete="off">
 <input type="hidden" name="request_id" value="${escapeHtml(requestId)}">
-<label for="password">Owner password</label>
+<label for="password">${passwordLabel}</label>
 <input id="password" name="password" type="password" required autocomplete="current-password">
-<button type="submit">Authorize</button>
+<button type="submit">${buttonLabel}</button>
 </form>
 </body>
 </html>`;
 }
 
-function renderLoginError(message: string): string {
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Authorization error</title></head><body><h1>Authorization error</h1><p>${escapeHtml(message)}</p></body></html>`;
+function renderLoginError(message: string, zh: boolean): string {
+    const title = zh ? '授权错误' : 'Authorization error';
+    return `<!doctype html><html lang="${zh ? 'zh-CN' : 'en'}"><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1><p>${escapeHtml(message)}</p></body></html>`;
 }
 
 function escapeHtml(value: string): string {
