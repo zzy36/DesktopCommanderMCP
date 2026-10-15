@@ -5,7 +5,6 @@ import { pathToFileURL } from 'node:url';
 
 const programData = process.env.ProgramData ?? process.env.PROGRAMDATA ?? path.join(path.parse(os.homedir()).root, 'ProgramData');
 const canonicalRoot = path.join(programData, 'LocalControlMCP');
-const legacyRoot = path.join(programData, 'LocalRemoteMCP');
 
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return null; }
@@ -21,9 +20,7 @@ async function firstJson(candidates) {
 
 const runtimeConfigResolved = await firstJson([
   process.env.LOCAL_CONTROL_MCP_CONFIG,
-  process.env.LOCAL_REMOTE_MCP_CONFIG,
   path.join(canonicalRoot, 'runtime.json'),
-  path.join(legacyRoot, 'runtime.json'),
 ]);
 const runtimeConfigPath = runtimeConfigResolved.path;
 const runtimeConfig = runtimeConfigResolved.value;
@@ -40,16 +37,11 @@ if (!controlRoot) {
 
 const runtimeCandidates = [];
 if (process.env.LOCAL_CONTROL_MCP_RUNTIME) runtimeCandidates.push(process.env.LOCAL_CONTROL_MCP_RUNTIME);
-if (process.env.LOCAL_REMOTE_MCP_RUNTIME) runtimeCandidates.push(process.env.LOCAL_REMOTE_MCP_RUNTIME);
 if (typeof runtimeConfig?.runtimeRoot === 'string' && runtimeConfig.runtimeRoot.trim()) runtimeCandidates.push(runtimeConfig.runtimeRoot);
 runtimeCandidates.push(path.join(canonicalRoot, 'DesktopCommanderMCP'));
-// One-way migration compatibility. Remove after the old ProgramData runtime is formally retired.
-runtimeCandidates.push(path.join(legacyRoot, 'DesktopCommanderMCP'));
 
 const projectsRoot = path.dirname(path.resolve(controlRoot));
 runtimeCandidates.push(path.join(projectsRoot, 'local-control-mcp', 'local-only', 'mcp', 'DesktopCommanderMCP'));
-// Development rollback compatibility only.
-runtimeCandidates.push(path.join(projectsRoot, 'local-mcp', 'local-only', 'mcp', 'DesktopCommanderMCP'));
 
 let target = null;
 for (const candidate of runtimeCandidates) {

@@ -1,7 +1,8 @@
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { writeFile, rm } from 'node:fs/promises';
+import { writeFile, rm, mkdtemp, mkdir } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
@@ -37,3 +38,19 @@ try {
   await client.close().catch(() => undefined);
   await rm(runtimeConfig, { force: true }).catch(() => undefined);
 }
+
+const retiredFixture = await mkdtemp(path.join(os.tmpdir(), 'lcm-retired-launcher-'));
+try {
+  const legacyFile = path.join(retiredFixture, 'legacy.js');
+  const marker = path.join(retiredFixture, 'legacy-executed');
+  await writeFile(legacyFile, `require('fs').writeFileSync(${JSON.stringify(marker)},'bad');`);
+  await mkdir(path.join(retiredFixture, '.control'));
+  const missingCanonical = spawnSync(process.execPath, [launcher], {
+    env: { ...process.env, ProgramData: retiredFixture, PROGRAMDATA: retiredFixture,
+      MACHINE_CONTROL_ROOT: path.join(retiredFixture, '.control'), LOCAL_CONTROL_MCP_RUNTIME: '', LOCAL_CONTROL_MCP_CONFIG: path.join(retiredFixture, 'missing.json'),
+      LOCAL_REMOTE_MCP_RUNTIME: legacyFile, FLEET_AGENT_CONFIG: path.join(retiredFixture, 'missing-agent.json') }, encoding: 'utf8',
+  });
+  assert.notEqual(missingCanonical.status, 0, 'retired runtime must not be an implicit availability fallback');
+  await assert.rejects(import('node:fs/promises').then(fs => fs.readFile(marker)), /ENOENT/);
+  console.log('retired launcher fallback denied');
+} finally { await rm(retiredFixture, { recursive: true, force: true }); }
