@@ -15,6 +15,10 @@ export interface FleetPluginBackend {
     fleetStatus(projectId: string, hostname: string): Promise<Record<string, unknown>>;
     listDevices(projectId: string): Promise<FleetPluginDeviceView[]>;
     callProjectTool(projectId: string, hostname: string, toolName: string, args: Record<string, unknown>): Promise<unknown>;
+    ping(projectId: string, hostname: string): Promise<Record<string, unknown>>;
+    whoAmI(): Promise<Record<string, unknown>>;
+    getToolResult(projectId: string, hostname: string, callId: string): Promise<Record<string, unknown>>;
+    listRemoteToolCalls(projectId: string, hostname: string | undefined, limit: number): Promise<Record<string, unknown>[]>;
     readTestFile?(projectId: string, hostname: string): Promise<string>;
     writeTestFile?(projectId: string, hostname: string, content: string): Promise<{ bytesWritten: number }>;
 }
@@ -50,6 +54,60 @@ const FLEET_CONTROL_TOOLS: any[] = [
         inputSchema: {
             type: 'object',
             properties: { project_id: { type: 'string', minLength: 1 } },
+            required: ['project_id'],
+            additionalProperties: false,
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    {
+        name: 'ping',
+        title: 'Ping Fleet Device',
+        description: 'Verify that the exact authorized LCM Fleet device is currently online.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                project_id: { type: 'string', minLength: 1 },
+                hostname: { type: 'string', minLength: 1 },
+            },
+            required: ['project_id', 'hostname'],
+            additionalProperties: false,
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    {
+        name: 'who_am_i',
+        title: 'LCM Identity',
+        description: 'Report the self-hosted LCM control-plane identity. Hosted RDC account/quota semantics are intentionally not used.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    {
+        name: 'get_tool_result',
+        title: 'Get Remote Tool Result',
+        description: 'Get one Fleet remote call record only when it belongs to the exact authorized project and device.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                project_id: { type: 'string', minLength: 1 },
+                hostname: { type: 'string', minLength: 1 },
+                call_id: { type: 'string', minLength: 1 },
+            },
+            required: ['project_id', 'hostname', 'call_id'],
+            additionalProperties: false,
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    {
+        name: 'list_remote_tool_calls',
+        title: 'List Remote Tool Calls',
+        description: 'List recent Fleet calls scoped to one L3 project and optionally one exact host.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                project_id: { type: 'string', minLength: 1 },
+                hostname: { type: 'string', minLength: 1 },
+                limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+            },
             required: ['project_id'],
             additionalProperties: false,
         },
@@ -135,6 +193,29 @@ export function createFleetPluginMcpServer(
                 requireScope(extra, 'fleet:read', enforceScopes);
                 const projectId = requiredString(args, 'project_id');
                 return jsonResult({ project_id: projectId, devices: await backend.listDevices(projectId) });
+            }
+            if (toolName === 'ping') {
+                requireScope(extra, 'fleet:read', enforceScopes);
+                return jsonResult(await backend.ping(requiredString(args, 'project_id'), requiredString(args, 'hostname')));
+            }
+            if (toolName === 'who_am_i') {
+                requireScope(extra, 'fleet:read', enforceScopes);
+                return jsonResult(await backend.whoAmI());
+            }
+            if (toolName === 'get_tool_result') {
+                requireScope(extra, 'fleet:read', enforceScopes);
+                return jsonResult(await backend.getToolResult(
+                    requiredString(args, 'project_id'),
+                    requiredString(args, 'hostname'),
+                    requiredString(args, 'call_id'),
+                ));
+            }
+            if (toolName === 'list_remote_tool_calls') {
+                requireScope(extra, 'fleet:read', enforceScopes);
+                const projectId = requiredString(args, 'project_id');
+                const hostname = typeof args.hostname === 'string' && args.hostname.trim() ? args.hostname.trim() : undefined;
+                const limit = typeof args.limit === 'number' && Number.isInteger(args.limit) ? args.limit : 20;
+                return jsonResult({ project_id: projectId, calls: await backend.listRemoteToolCalls(projectId, hostname, limit) });
             }
 
             const definition = REMOTE_BY_NAME.get(toolName);

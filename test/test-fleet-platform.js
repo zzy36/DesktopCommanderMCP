@@ -14,6 +14,7 @@ import { FleetGateway } from '../dist/remote-device/fleet/fleet-gateway.js';
 import { FileGenerationStore } from '../dist/remote-device/fleet/gateway-state.js';
 import { FleetGatewayPluginBackend } from '../dist/remote-device/fleet/gateway-plugin-backend.js';
 import { createFleetPluginHttpServer } from '../dist/remote-device/fleet/plugin-server.js';
+import { LCM_PROJECT_TOOLS } from '../dist/remote-device/fleet/project-tool-contract.js';
 
 const controlRoot = process.env.FLEET_TEST_CONTROL_ROOT;
 assert(controlRoot, 'FLEET_TEST_CONTROL_ROOT is required');
@@ -128,7 +129,7 @@ try {
   const tools = await client.listTools();
   assert.deepEqual(
     tools.tools.map((tool) => tool.name).sort(),
-    ['fleet_status', 'list_devices', 'read_test_file', 'write_test_file'].sort(),
+    ['fleet_status', 'list_devices', 'ping', 'who_am_i', 'get_tool_result', 'list_remote_tool_calls', ...LCM_PROJECT_TOOLS].sort(),
   );
 
   const status = await client.callTool({
@@ -148,22 +149,22 @@ try {
 
   const probe = `plus-personal-plugin-local-write-${Date.now()}`;
   const write = await client.callTool({
-    name: 'write_test_file',
-    arguments: { project_id: 'network.ikuai', hostname: 'YUAN', content: probe },
+    name: 'write_file',
+    arguments: { project_id: 'network.ikuai', hostname: 'YUAN', path: probeFile, content: probe, mode: 'rewrite' },
   });
   assert.equal(write.isError, undefined);
   assert.equal(await readFile(probeFile, 'utf8'), probe);
 
   const read = await client.callTool({
-    name: 'read_test_file',
-    arguments: { project_id: 'network.ikuai', hostname: 'YUAN' },
+    name: 'read_file',
+    arguments: { project_id: 'network.ikuai', hostname: 'YUAN', path: probeFile },
   });
   assert.equal(read.isError, undefined);
   assert.match(firstText(read), new RegExp(probe));
 
   const wrongHost = await client.callTool({
-    name: 'write_test_file',
-    arguments: { project_id: 'network.ikuai', hostname: 'HEMA', content: 'must-not-write' },
+    name: 'write_file',
+    arguments: { project_id: 'network.ikuai', hostname: 'HEMA', path: probeFile, content: 'must-not-write', mode: 'rewrite' },
   });
   assert.equal(wrongHost.isError, true);
   assert.equal(await readFile(probeFile, 'utf8'), probe);
@@ -173,6 +174,41 @@ try {
   assert(callRecords.some((record) => record.toolName === 'write_file' && record.status === 'completed'));
   assert(audit.events.some((event) => event.event === 'call_completed'));
   assert.equal(audit.events.some((event) => JSON.stringify(event).includes(probe)), false);
+
+
+  const ping = await client.callTool({
+    name: 'ping',
+    arguments: { project_id: 'network.ikuai', hostname: 'YUAN' },
+  });
+  assert.equal(ping.isError, undefined);
+  assert.match(firstText(ping), /"pong": true/);
+
+  const who = await client.callTool({ name: 'who_am_i', arguments: {} });
+  assert.equal(who.isError, undefined);
+  assert.match(firstText(who), /"product": "Local Control MCP"/);
+  assert.match(firstText(who), /"hosted": false/);
+
+  const remoteCalls = await client.callTool({
+    name: 'list_remote_tool_calls',
+    arguments: { project_id: 'network.ikuai', hostname: 'YUAN', limit: 10 },
+  });
+  assert.equal(remoteCalls.isError, undefined);
+  const parsedCalls = JSON.parse(firstText(remoteCalls));
+  const writeCall = parsedCalls.calls.find((record) => record.toolName === 'write_file' && record.status === 'completed');
+  assert(writeCall?.callId);
+
+  const fetched = await client.callTool({
+    name: 'get_tool_result',
+    arguments: { project_id: 'network.ikuai', hostname: 'YUAN', call_id: writeCall.callId },
+  });
+  assert.equal(fetched.isError, undefined);
+  assert.match(firstText(fetched), new RegExp(writeCall.callId));
+
+  const hidden = await client.callTool({
+    name: 'get_tool_result',
+    arguments: { project_id: 'network.ikuai', hostname: 'HEMA', call_id: writeCall.callId },
+  });
+  assert.equal(hidden.isError, true);
 
   console.log('fleet full local platform tests passed');
 } finally {

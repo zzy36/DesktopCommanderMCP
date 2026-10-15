@@ -65,7 +65,7 @@ await client.connect(transport);
 const tools = await client.listTools();
 assert.deepEqual(
   tools.tools.map((tool) => tool.name).sort(),
-  ['fleet_status', 'list_devices', ...LCM_PROJECT_TOOLS].sort(),
+  ['fleet_status', 'list_devices', 'ping', 'who_am_i', 'get_tool_result', 'list_remote_tool_calls', ...LCM_PROJECT_TOOLS].sort(),
 );
 
 const result = await client.callTool({

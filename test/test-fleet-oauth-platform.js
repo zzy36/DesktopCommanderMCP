@@ -309,7 +309,7 @@ try {
   const tools = await fullClient.listTools();
   assert.deepEqual(
     tools.tools.map((tool) => tool.name).sort(),
-    ['fleet_status', 'list_devices', ...LCM_PROJECT_TOOLS].sort(),
+    ['fleet_status', 'list_devices', 'ping', 'who_am_i', 'get_tool_result', 'list_remote_tool_calls', ...LCM_PROJECT_TOOLS].sort(),
   );
 
   const probe = `oauth-write-ok-${Date.now()}`;

@@ -233,7 +233,7 @@ await client.connect(transport);
 const listed = await client.listTools();
 assert.deepEqual(
   listed.tools.map((tool) => tool.name).sort(),
-  ['fleet_status', 'list_devices', ...LCM_PROJECT_TOOLS].sort(),
+  ['fleet_status', 'list_devices', 'ping', 'who_am_i', 'get_tool_result', 'list_remote_tool_calls', ...LCM_PROJECT_TOOLS].sort(),
 );
 
 const status = await client.callTool({
@@ -277,4 +277,4 @@ if (controlPolicy) await controlPolicy.stop();
 await new Promise((resolve) => wsServer.close(resolve));
 await rm(testRoot, { recursive: true, force: true });
 
-console.log('LCM remote HTTP 22-tool contract passed');
+console.log('LCM remote HTTP 26-tool contract passed');

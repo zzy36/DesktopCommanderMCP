@@ -70,6 +70,55 @@ export class FleetGatewayPluginBackend implements FleetPluginBackend {
         return this.gateway.dispatch(projectId, hostname, toolName, { ...args }, this.callTimeoutMs);
     }
 
+    async ping(projectId: string, hostnameInput: string): Promise<Record<string, unknown>> {
+        const hostname = canonicalHostname(hostnameInput);
+        const status = this.gateway.deviceStatus(projectId, hostname);
+        if (!status.online) {
+            throw Object.assign(new Error(`target ${hostname} is offline`), { code: 'TARGET_OFFLINE' });
+        }
+        return {
+            pong: true,
+            project_id: projectId,
+            hostname,
+            timestamp_ms: Date.now(),
+            generation: status.generation,
+            policy_revision: status.policyRevision,
+            last_seen_at_ms: status.lastSeenAtMs,
+        };
+    }
+
+    async whoAmI(): Promise<Record<string, unknown>> {
+        return {
+            product: 'Local Control MCP',
+            short_name: 'LCM',
+            server: 'local_control_mcp',
+            hosted: false,
+            transport: 'self_hosted_fleet',
+            hosted_rdc_quota: 'not_applicable',
+        };
+    }
+
+    async getToolResult(projectId: string, hostnameInput: string, callId: string): Promise<Record<string, unknown>> {
+        const hostname = canonicalHostname(hostnameInput);
+        this.gateway.deviceStatus(projectId, hostname);
+        const record = this.gateway.getCallRecord(callId);
+        if (!record || record.projectId !== projectId || record.hostname !== hostname) {
+            throw Object.assign(new Error(`remote call is not visible to ${projectId} on ${hostname}`), { code: 'PROJECT_DEVICE_DENIED' });
+        }
+        return { ...record };
+    }
+
+    async listRemoteToolCalls(projectId: string, hostnameInput: string | undefined, limit: number): Promise<Record<string, unknown>[]> {
+        const hostname = hostnameInput ? canonicalHostname(hostnameInput) : undefined;
+        if (hostname) this.gateway.deviceStatus(projectId, hostname);
+        else this.gateway.listProjectDevices(projectId);
+        const bounded = Math.max(1, Math.min(limit, 50));
+        return this.gateway.listCallRecords(1024)
+            .filter((record) => record.projectId === projectId && (!hostname || record.hostname === hostname))
+            .slice(0, bounded)
+            .map((record) => ({ ...record }));
+    }
+
     // Migration-only probe helpers. They are no longer exposed on the user-facing MCP surface.
     async readTestFile(projectId: string, hostnameInput: string): Promise<string> {
         const probe = this.requireProbe(projectId, hostnameInput);
