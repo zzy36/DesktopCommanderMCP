@@ -42,9 +42,9 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
     });
 
     app.get('/oauth/approve', (req: Request, res: Response) => {
-        setApprovalHeaders(res, options.approvalUrl);
         const requestId = typeof req.query.request_id === 'string' ? req.query.request_id : '';
         const pending = requestId ? options.provider.getPendingAuthorization(requestId) : null;
+        setApprovalHeaders(res, options.approvalUrl, pending?.redirectUri);
         const zh = prefersChinese(req);
         if (!pending) {
             res.status(400).send(renderApprovalError(zh ? '此授权请求无效或已过期。' : 'This authorization request is invalid or expired.', zh));
@@ -138,9 +138,13 @@ function setNoStore(res: Response): void {
     res.setHeader('Pragma', 'no-cache');
 }
 
-function setApprovalHeaders(res: Response, approvalUrl: URL): void {
+function setApprovalHeaders(res: Response, approvalUrl: URL, redirectUri?: string): void {
     setNoStore(res);
-    res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action ${approvalUrl.origin}; frame-ancestors 'none'; base-uri 'none'`);
+    // Chromium also checks the destination of the approval POST's 302 callback.
+    // This URI comes from the provider's validated, client-bound authorization request.
+    const formOrigins = new Set([approvalUrl.origin]);
+    if (redirectUri) formOrigins.add(new URL(redirectUri).origin);
+    res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action ${[...formOrigins].join(' ')}; frame-ancestors 'none'; base-uri 'none'`);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY');

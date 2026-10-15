@@ -203,6 +203,11 @@ async function authorize(client, scopes, { wrongApprovalCode = false, wrongVerif
 
   const approvalPage = await fetch(approvalPageUrl, { headers: { 'accept-language': 'zh-CN,zh;q=0.9' } });
   assert.equal(approvalPage.status, 200);
+  const formAction = approvalPage.headers.get('content-security-policy')
+    .split(';').map((directive) => directive.trim()).find((directive) => directive.startsWith('form-action '));
+  assert.deepEqual(formAction.split(/\s+/).slice(1).sort(),
+    [approvalUrl.origin, new URL(client.redirect_uris[0]).origin].sort(),
+    'approval form must permit its LAN destination and this client callback, without wildcard origins');
   const approvalHtml = await approvalPage.text();
   assert.match(approvalHtml, /Local Control MCP/);
   assert.match(approvalHtml, /验证码/);
