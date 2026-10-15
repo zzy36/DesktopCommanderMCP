@@ -37,6 +37,7 @@ export interface FleetGatewayDeviceStatus {
     sessionId: string | null;
     generation: number | null;
     policyRevision: string | null;
+    agentVersion: string | null;
     connectedAtMs: number | null;
     lastSeenAtMs: number | null;
 }
@@ -68,6 +69,7 @@ type GatewaySession = {
     hostname: string | null;
     generation: number | null;
     policyRevision: string | null;
+    agentVersion: string | null;
     publicKeyFingerprint: string | null;
     connectedAtMs: number;
     lastSeenAtMs: number;
@@ -114,6 +116,7 @@ export class FleetGateway {
     private readonly heartbeatSweepMs: number;
     private readonly sessionsById = new Map<string, GatewaySession>();
     private readonly activeByHost = new Map<string, GatewaySession>();
+    private readonly lastByHost = new Map<string, GatewaySession>();
     private readonly pendingCalls = new Map<string, PendingCall>();
     private readonly callRecords = new Map<string, FleetGatewayCallRecord>();
     private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -170,6 +173,7 @@ export class FleetGateway {
             hostname: null,
             generation: null,
             policyRevision: null,
+            agentVersion: null,
             publicKeyFingerprint: null,
             connectedAtMs: Date.now(),
             lastSeenAtMs: Date.now(),
@@ -336,7 +340,7 @@ export class FleetGateway {
         if (!project || project.hostname !== hostname) {
             throw new FleetGatewayError('PROJECT_DEVICE_DENIED', `project ${projectId} is not authorized for ${hostname}`);
         }
-        const session = this.activeByHost.get(hostname);
+        const session = this.activeByHost.get(hostname) ?? this.lastByHost.get(hostname);
         const expectedPolicy = this.expectedPolicyByHost.get(hostname);
         const online = Boolean(
             session
@@ -350,6 +354,7 @@ export class FleetGateway {
             sessionId: online ? session!.sessionId : null,
             generation: online ? session!.generation : null,
             policyRevision: session?.policyRevision ?? null,
+            agentVersion: session?.agentVersion ?? null,
             connectedAtMs: session?.connectedAtMs ?? null,
             lastSeenAtMs: session?.lastSeenAtMs ?? null,
         };
@@ -395,7 +400,7 @@ export class FleetGateway {
 
     listKnownDeviceStatuses(): Array<FleetGatewayDeviceStatus & { publicKeyFingerprint: string }> {
         return [...this.devices.values()].map((device) => {
-            const session = this.activeByHost.get(device.hostname);
+            const session = this.activeByHost.get(device.hostname) ?? this.lastByHost.get(device.hostname);
             const expectedPolicy = this.expectedPolicyByHost.get(device.hostname);
             const online = Boolean(
                 session
@@ -410,6 +415,7 @@ export class FleetGateway {
                 sessionId: online ? session!.sessionId : null,
                 generation: online ? session!.generation : null,
                 policyRevision: session?.policyRevision ?? null,
+            agentVersion: session?.agentVersion ?? null,
                 connectedAtMs: session?.connectedAtMs ?? null,
                 lastSeenAtMs: session?.lastSeenAtMs ?? null,
             };
@@ -525,7 +531,9 @@ export class FleetGateway {
         session.policyRevision = policyRevision;
         session.publicKeyFingerprint = fingerprint;
         session.lastSeenAtMs = Date.now();
+        session.agentVersion = typeof message.agentVersion === 'string' && /^[A-Za-z0-9._+-]{1,80}$/.test(message.agentVersion) ? message.agentVersion : null;
         this.activeByHost.set(hostname, session);
+        this.lastByHost.set(hostname, session);
         this.send(session, { type: 'accepted', sessionId: session.sessionId, generation });
         await this.audit.record({
             event: 'session_authenticated',

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { realpath } from 'node:fs/promises';
 import { ControlProjectAuthorization } from './control-policy.js';
 
 export const LCM_PROJECT_TOOLS = new Set([
@@ -92,6 +93,7 @@ export function scopeProjectToolArgs(
   const args: Record<string, unknown> = { ...input };
   delete args.project_id;
   delete args.hostname;
+  delete args.execution_context;
   scopeFileArgs(toolName, args, auth);
   if (toolName === 'start_process') {
     const root = requirePhysicalRoot(auth);
@@ -155,8 +157,11 @@ export class ProjectResourceScope {
     if (identifiers.length === 0) {
       return { content: [{ type: 'text', text: toolName === 'list_sessions' ? 'No LCM-owned terminal sessions.' : 'No LCM-owned searches.' }] };
     }
-    const blocks = raw.split(/\r?\n\s*\r?\n/).filter((block) => identifiers.some((id) => block.includes(id)));
-    return { content: [{ type: 'text', text: blocks.length ? blocks.join('\n\n') : identifiers.join('\n') }] };
+    const owned = new Set(identifiers);
+    const blocks = toolName === 'list_sessions'
+      ? raw.split(/\r?\n/).filter(line => { const match = line.match(/^PID:\s*(\d+)(?:\b|,)/); return match && owned.has(match[1]); })
+      : raw.split(/\r?\n\s*\r?\n/).filter(block => { const match = block.match(/^Session:\s*([^\s]+)\s*$/m); return match && owned.has(match[1]); });
+    return { content: [{ type: 'text', text: blocks.length ? blocks.join('\n\n') : (toolName === 'list_sessions' ? 'No LCM-owned terminal sessions.' : 'No LCM-owned searches.') }] };
   }
 
   private sanitizeConfig(projectId: string, auth: ControlProjectAuthorization, result: any, deviceName: string): any {
@@ -175,5 +180,36 @@ export class ProjectResourceScope {
       } : undefined,
     } : { product: 'Local Control MCP', project_id: projectId, device_name: deviceName, physical_root: auth.physicalRoot };
     return { content: [{ type: 'text', text: JSON.stringify(safe, null, 2) }] };
+  }
+}
+
+/** Resolve existing ancestors as well as lexical scope: a junction/symlink cannot
+ * turn a project file tool into an unrelated-file access. Terminal remains an
+ * authorized machine capability, not an invented filesystem sandbox. */
+export async function validateProjectToolPaths(toolName: string, args: Record<string, unknown>, auth: ControlProjectAuthorization): Promise<void> {
+  if (!PATH_TOOLS.has(toolName)) return;
+  const root = await realpath(requirePhysicalRoot(auth));
+  const values: unknown[] = toolName === 'read_multiple_files' ? (args.paths as unknown[] ?? [])
+    : toolName === 'move_file' ? [args.source, args.destination]
+    : toolName === 'edit_block' ? [args.file_path] : [args.path];
+  if (toolName === 'write_pdf') {
+    if (args.outputPath) values.push(args.outputPath);
+    if (Array.isArray(args.content)) for (const entry of args.content) if (entry?.sourcePdfPath) values.push(entry.sourcePdfPath);
+  }
+  for (const value of values) {
+    if (typeof value !== 'string') throw new Error('filesystem path required');
+    let ancestor = path.resolve(value);
+    let resolved: string;
+    for (;;) {
+      try { resolved = await realpath(ancestor); break; }
+      catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+        const parent = path.dirname(ancestor);
+        if (parent === ancestor) throw cause;
+        ancestor = parent;
+      }
+    }
+    const relative = path.relative(root, resolved);
+    if (relative && (relative.startsWith('..') || path.isAbsolute(relative))) throw Object.assign(new Error('path resolves outside authorized project root'), { code: 'PROJECT_DEVICE_DENIED' });
   }
 }

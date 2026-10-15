@@ -1,3 +1,4 @@
+import { InteractiveUserClient } from './interactive-user-bridge.js';
 import os from 'node:os';
 import path from 'node:path';
 import { DesktopCommanderIntegration } from '../desktop-commander-integration.js';
@@ -5,7 +6,7 @@ import { ControlPolicyAuthorizer, ControlPolicyError, ControlProjectAuthorizatio
 import { DeviceIdentityStore, StoredFleetIdentity } from './device-identity.js';
 import { FleetChannel, FleetChannelOptions, FleetChannelState } from './fleet-channel.js';
 import { canonicalHostname } from './identity.js';
-import { ProjectResourceScope, scopeProjectToolArgs } from './project-tool-contract.js';
+import { ProjectResourceScope, scopeProjectToolArgs, validateProjectToolPaths } from './project-tool-contract.js';
 
 export interface FleetToolPolicyContext {
     authorization: ControlProjectAuthorization;
@@ -27,6 +28,7 @@ export interface FleetAgentOptions {
     stateDir: string;
     toolPolicy: FleetToolPolicy;
     hostname?: string;
+    interactiveStateDir?: string;
     desktop?: DesktopCommanderIntegration;
     policyWatchMs?: number;
     channel?: Partial<Pick<
@@ -65,6 +67,8 @@ export class FleetAgent {
     private started = false;
     private refreshPromise: Promise<void> | null = null;
     private readonly resources = new ProjectResourceScope();
+    private readonly processContexts = new Map<number, string>();
+    private readonly searchContexts = new Map<string, string>();
 
     constructor(options: FleetAgentOptions) {
         if (!options.gatewayUrl) throw new Error('gatewayUrl is required');
@@ -169,6 +173,7 @@ export class FleetAgent {
             url: this.options.gatewayUrl,
             hostname: this.hostname,
             policyRevision: revision,
+            agentVersion: process.env.LCM_RELEASE,
             publicKeyPem: this.identity.publicKeyPem,
             privateKey: this.identity.privateKeyPem,
             authorize: async (projectId, hostname) => {
@@ -193,7 +198,15 @@ export class FleetAgent {
                     callId: context.callId,
                     generation: context.generation,
                 });
-                const result = await this.desktop.callClientTool(toolName, safeArgs, {
+                const explicitContext = args.execution_context;
+                if (explicitContext !== undefined && explicitContext !== 'system' && explicitContext !== 'interactive') throw new ControlPolicyError('PROJECT_DEVICE_DENIED', 'invalid execution_context');
+                const ownerContext = typeof args.pid === 'number' ? this.processContexts.get(args.pid) : (typeof args.sessionId === 'string' ? this.searchContexts.get(args.sessionId) : undefined);
+                if (ownerContext && explicitContext && explicitContext !== ownerContext) throw new ControlPolicyError('PROJECT_DEVICE_DENIED', 'resource belongs to another execution context');
+                const executionContext = explicitContext ?? ownerContext ?? 'system';
+                if (executionContext === 'interactive' && !this.options.interactiveStateDir) throw Object.assign(new Error('interactive user session is not configured; SYSTEM fallback is denied'), { code: 'INTERACTIVE_SESSION_UNAVAILABLE' });
+                const result = executionContext === 'interactive'
+                    ? await new InteractiveUserClient(this.options.interactiveStateDir!).callTool(toolName, safeArgs, context.projectId, context.hostname, context.signal)
+                    : await this.desktop.callClientTool(toolName, safeArgs, {
                     project_id: context.projectId,
                     local_control_mcp: true,
                     fleet_hostname: context.hostname,
@@ -205,6 +218,9 @@ export class FleetAgent {
                     maxTotalTimeout: this.options.channel?.callTimeoutMs,
                 });
                 this.resources.record(toolName, context.projectId, result, safeArgs);
+                const text = JSON.stringify(result);
+                if (toolName === 'start_process') { const match = text.match(/Process started with PID\s+(\d+)/i); if (match) this.processContexts.set(Number(match[1]), executionContext as string); }
+                if (toolName === 'start_search') { const match = text.match(/search session:\s*([^\s"\\]+)/i); if (match) this.searchContexts.set(match[1], executionContext as string); }
                 return this.resources.transform(toolName, context.projectId, authorization, result, context.hostname);
             },
             ...this.options.channel,
@@ -215,7 +231,7 @@ export class FleetAgent {
 }
 
 export function createProjectControlPolicy(): FleetToolPolicy {
-    return async (toolName, args, context) => scopeProjectToolArgs(toolName, args, context.authorization);
+    return async (toolName, args, context) => { const safe = scopeProjectToolArgs(toolName, args, context.authorization); await validateProjectToolPaths(toolName, safe, context.authorization); return safe; };
 }
 export function createProjectProbePolicy(
     fileName = '.network-fleet-plugin-probe.txt',

@@ -25,6 +25,7 @@ const AgentConfigSchema = z.object({
     hostname: z.string().min(1).optional(),
     probeFileName: z.string().min(1).optional(),
     policyWatchMs: PositiveInt.optional(),
+    interactiveStateDir: z.string().min(1).optional(),
     channel: AgentChannelSchema.optional(),
 }).strict();
 
@@ -94,6 +95,7 @@ export interface ResolvedAgentServiceConfig {
     hostname: string;
     probeFileName: string;
     policyWatchMs?: number;
+    interactiveStateDir?: string;
     channel?: z.infer<typeof AgentChannelSchema>;
 }
 
@@ -153,6 +155,7 @@ export async function loadAgentServiceConfig(
         hostname,
         probeFileName,
         policyWatchMs: raw.policyWatchMs,
+        interactiveStateDir: raw.interactiveStateDir,
         channel: raw.channel,
     };
 }

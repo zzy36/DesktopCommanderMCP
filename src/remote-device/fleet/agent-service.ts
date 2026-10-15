@@ -26,6 +26,7 @@ export async function startFleetAgentService(
         hostname: config.hostname,
         toolPolicy: createProjectControlPolicy(),
         policyWatchMs: config.policyWatchMs,
+        interactiveStateDir: config.interactiveStateDir,
         channel: config.channel,
     });
     await agent.start();

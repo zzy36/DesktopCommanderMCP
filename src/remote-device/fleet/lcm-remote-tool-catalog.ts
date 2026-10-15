@@ -959,3 +959,8 @@ export const LCM_REMOTE_TOOL_CATALOG: any[] = [
     }
   }
 ];
+
+// Execution identity is explicit and independent of D0/project authorization.
+for (const tool of LCM_REMOTE_TOOL_CATALOG) {
+  tool.inputSchema.properties.execution_context = { type: 'string', enum: ['system', 'interactive'], description: 'Use interactive for Git credentials, browser/GUI, or logged-in user profile. Requires an authorized logged-in user on this exact D0; never falls back to SYSTEM.' };
+}

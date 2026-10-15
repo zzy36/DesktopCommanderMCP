@@ -6,7 +6,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { DesktopCommanderIntegration } from '../desktop-commander-integration.js';
 import { ControlPolicyAuthorizer } from './control-policy.js';
-import { LCM_PROJECT_TOOLS, ProjectResourceScope, scopeProjectToolArgs } from './project-tool-contract.js';
+import { LCM_PROJECT_TOOLS, ProjectResourceScope, scopeProjectToolArgs, validateProjectToolPaths } from './project-tool-contract.js';
 
 const stderr = (...args: unknown[]) => process.stderr.write(`${args.map(formatLogValue).join(' ')}\n`);
 console.log = stderr;
@@ -98,6 +98,7 @@ async function main(): Promise<void> {
       const auth = await authorizer.authorize(projectId, localHostname);
       resources.assertOwned(toolName, projectId, rawArgs);
       const args = scopeProjectToolArgs(toolName, rawArgs, auth);
+      await validateProjectToolPaths(toolName, args, auth);
       const result = await desktop.callClientTool(toolName, args, {
         project_id: projectId,
         local_control_mcp: true,

@@ -19,6 +19,7 @@ export interface FleetChannelOptions {
     url: string;
     hostname: string;
     policyRevision: string;
+    agentVersion?: string;
     publicKeyPem: string;
     privateKey: Parameters<typeof sign>[2];
     authorize: (projectId: string, hostname: string) => boolean | Promise<boolean>;
@@ -207,6 +208,7 @@ export class FleetChannel {
             hostname: this.hostname,
             policyRevision: this.options.policyRevision,
             publicKeyPem: this.options.publicKeyPem,
+            agentVersion: this.options.agentVersion,
             signature,
         });
     }

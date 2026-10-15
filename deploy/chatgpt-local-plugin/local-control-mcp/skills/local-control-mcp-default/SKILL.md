@@ -9,6 +9,8 @@ Treat these as separate control paths:
 - **Official Remote MCP** is the hosted Remote Desktop Commander path kept enabled as fallback.
 - **Computer Use / GUI automation** is separate from both MCP transports.
 
+After any eligible Official fallback, the next new user-level operation must probe LCM for the same L3/D0 first. If healthy, automatically return to LCM before substantive work. Fallback never remains sticky across operations.
+
 For an unqualified MCP/remote-control request, first resolve the exact active L3 `project_id` and its fixed D0 target from `.control`. Do not choose a transport before the project/device route is known.
 
 Use the `local_control_mcp` server first. Every Local tool call must include the exact active L3 `project_id`. Never invent, substitute, or rebind a project or device.
@@ -22,3 +24,5 @@ Local Control MCP re-authorizes every call through the machine's `.control` poli
 Prefer Local Control MCP for file inspection/editing, searches, terminal commands and project-scoped process sessions. Use Computer Use only when the task specifically requires GUI/browser/mouse/keyboard interaction.
 
 On web/mobile/iPad, prefer the self-hosted Secure MCP Tunnel path when available. If that Local path has a confirmed runtime, startup, or transport failure, the same fallback rule applies: Official Remote MCP may be used automatically only for the same fixed D0/project. Capability gaps and Local authorization/security denials do not trigger automatic fallback.
+
+For remote work that depends on the logged-in user's Git credentials, browser/GUI or profile, use `execution_context: interactive`. LCM re-authorizes it on the exact D0 and requires a live user bridge. A missing interactive session never authorizes SYSTEM or RDC fallback. Follow-up process/search operations inherit the original execution context; do not change it. Background work can use `system`.
