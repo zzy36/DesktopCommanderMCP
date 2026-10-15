@@ -1,6 +1,6 @@
 import { ControlPolicyAuthorizer } from './control-policy.js';
 import { DeviceIdentityStore } from './device-identity.js';
-import { FleetAgent, createProjectProbePolicy } from './fleet-agent.js';
+import { FleetAgent, createProjectControlPolicy } from './fleet-agent.js';
 import { ResolvedAgentServiceConfig } from './service-config.js';
 
 export interface RunningFleetAgentService {
@@ -24,7 +24,7 @@ export async function startFleetAgentService(
         controlRoot: config.controlRoot,
         stateDir: config.stateDir,
         hostname: config.hostname,
-        toolPolicy: createProjectProbePolicy(config.probeFileName),
+        toolPolicy: createProjectControlPolicy(),
         policyWatchMs: config.policyWatchMs,
         channel: config.channel,
     });

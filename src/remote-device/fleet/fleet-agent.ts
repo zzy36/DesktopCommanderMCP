@@ -5,6 +5,7 @@ import { ControlPolicyAuthorizer, ControlPolicyError, ControlProjectAuthorizatio
 import { DeviceIdentityStore, StoredFleetIdentity } from './device-identity.js';
 import { FleetChannel, FleetChannelOptions, FleetChannelState } from './fleet-channel.js';
 import { canonicalHostname } from './identity.js';
+import { ProjectResourceScope, scopeProjectToolArgs } from './project-tool-contract.js';
 
 export interface FleetToolPolicyContext {
     authorization: ControlProjectAuthorization;
@@ -63,6 +64,7 @@ export class FleetAgent {
     private policyTimer: ReturnType<typeof setInterval> | null = null;
     private started = false;
     private refreshPromise: Promise<void> | null = null;
+    private readonly resources = new ProjectResourceScope();
 
     constructor(options: FleetAgentOptions) {
         if (!options.gatewayUrl) throw new Error('gatewayUrl is required');
@@ -183,6 +185,7 @@ export class FleetAgent {
             },
             execute: async (toolName, args, context) => {
                 const authorization = await this.authorizer.authorize(context.projectId, context.hostname);
+                this.resources.assertOwned(toolName, context.projectId, args);
                 const safeArgs = await this.options.toolPolicy(toolName, args, {
                     authorization,
                     projectId: context.projectId,
@@ -190,8 +193,9 @@ export class FleetAgent {
                     callId: context.callId,
                     generation: context.generation,
                 });
-                return this.desktop.callClientTool(toolName, safeArgs, {
+                const result = await this.desktop.callClientTool(toolName, safeArgs, {
                     project_id: context.projectId,
+                    local_control_mcp: true,
                     fleet_hostname: context.hostname,
                     fleet_call_id: context.callId,
                     fleet_generation: context.generation,
@@ -200,6 +204,8 @@ export class FleetAgent {
                     timeout: this.options.channel?.callTimeoutMs,
                     maxTotalTimeout: this.options.channel?.callTimeoutMs,
                 });
+                this.resources.record(toolName, context.projectId, result, safeArgs);
+                return this.resources.transform(toolName, context.projectId, authorization, result, context.hostname);
             },
             ...this.options.channel,
         });
@@ -208,6 +214,9 @@ export class FleetAgent {
     }
 }
 
+export function createProjectControlPolicy(): FleetToolPolicy {
+    return async (toolName, args, context) => scopeProjectToolArgs(toolName, args, context.authorization);
+}
 export function createProjectProbePolicy(
     fileName = '.network-fleet-plugin-probe.txt',
     maxWriteBytes = 4_096,
