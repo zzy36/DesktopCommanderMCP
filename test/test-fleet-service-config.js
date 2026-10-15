@@ -19,17 +19,17 @@ try {
     schemaVersion: 1,
     mcp: {
       listenHost: '127.0.0.1',
-      listenPort: 8787,
+      listenPort: 24787,
       auth: { type: 'bearer', tokenEnv: 'FLEET_TEST_TOKEN' },
     },
     agent: {
       listenHost: '127.0.0.1',
-      listenPort: 8788,
+      listenPort: 24788,
       path: '/agent',
     },
     admin: {
       listenHost: '127.0.0.1',
-      listenPort: 8789,
+      listenPort: 24789,
       basePath: '/admin',
     },
     stateDir: join(root, 'state'),
@@ -42,15 +42,15 @@ try {
   await writeFile(gatewayPath, JSON.stringify(baseGateway));
   const gateway = await loadGatewayServiceConfig(gatewayPath, {});
   assert.equal(gateway.mcpListenHost, '127.0.0.1');
-  assert.equal(gateway.mcpListenPort, 8787);
-  assert.equal(gateway.agentListenPort, 8788);
-  assert.equal(gateway.adminListenPort, 8789);
+  assert.equal(gateway.mcpListenPort, 24787);
+  assert.equal(gateway.agentListenPort, 24788);
+  assert.equal(gateway.adminListenPort, 24789);
   assert.equal(gateway.adminBasePath, '/admin');
   assert.equal(gateway.mcpAuth.type, 'bearer');
 
   await writeFile(gatewayPath, JSON.stringify({
     ...baseGateway,
-    agent: { ...baseGateway.agent, listenPort: 8787 },
+    agent: { ...baseGateway.agent, listenPort: 24787 },
   }));
   await assert.rejects(loadGatewayServiceConfig(gatewayPath, {}), /distinct host\/port bindings/);
 
@@ -62,7 +62,7 @@ try {
 
   await writeFile(gatewayPath, JSON.stringify({
     ...baseGateway,
-    admin: { ...baseGateway.admin, listenPort: 8788 },
+    admin: { ...baseGateway.admin, listenPort: 24788 },
   }));
   await assert.rejects(loadGatewayServiceConfig(gatewayPath, {}), /Admin and Agent listeners must use distinct/);
 
@@ -89,7 +89,7 @@ try {
   const agentPath = join(root, 'agent.json');
   await writeFile(agentPath, JSON.stringify({
     schemaVersion: 1,
-    gatewayUrl: 'ws://fleet-mcp.home.arpa:9443/agent',
+    gatewayUrl: 'ws://fleet-mcp.home.arpa:24443/agent',
     controlRoot,
     stateDir: join(root, 'agent-state'),
     hostname: 'YUAN',
@@ -98,7 +98,7 @@ try {
 
   await writeFile(agentPath, JSON.stringify({
     schemaVersion: 1,
-    gatewayUrl: 'wss://fleet-mcp.home.arpa:9443/agent',
+    gatewayUrl: 'wss://fleet-mcp.home.arpa:24443/agent',
     controlRoot,
     stateDir: join(root, 'agent-state'),
     hostname: 'yuan',

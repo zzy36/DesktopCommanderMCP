@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "gatewayUrl": "wss://fleet-mcp.home.arpa:9443/agent",
+  "gatewayUrl": "wss://fleet-mcp.home.arpa:24443/agent",
   "hostname": "YUAN",
   "probeFileName": ".network-fleet-plugin-probe.txt",
   "policyWatchMs": 5000,

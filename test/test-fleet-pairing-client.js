@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { claimAndWaitForFleetPairing, fleetPairingOrigin } from '../dist/remote-device/fleet/pairing-client.js';
 
-assert.equal(fleetPairingOrigin('wss://172.16.1.253:9443/agent'), 'https://172.16.1.253:9443');
-assert.equal(fleetPairingOrigin('ws://127.0.0.1:8788/agent'), 'http://127.0.0.1:8788');
+assert.equal(fleetPairingOrigin('wss://172.16.1.253:24443/agent'), 'https://172.16.1.253:24443');
+assert.equal(fleetPairingOrigin('ws://127.0.0.1:24788/agent'), 'http://127.0.0.1:24788');
 assert.throws(() => fleetPairingOrigin('ftp://example.test/agent'), /unsupported Fleet Gateway protocol/);
 
 const calls = [];
 let polls = 0;
 const result = await claimAndWaitForFleetPairing({
-  gatewayUrl: 'wss://172.16.1.253:9443/agent',
+  gatewayUrl: 'wss://172.16.1.253:24443/agent',
   code: 'short-lived-test-code',
   hostname: 'NEWBOX',
   fingerprint: `sha256:${'1'.repeat(64)}`,
@@ -36,7 +36,7 @@ assert.equal(calls.length, 3);
 
 await assert.rejects(
   () => claimAndWaitForFleetPairing({
-    gatewayUrl: 'wss://172.16.1.253:9443/agent',
+    gatewayUrl: 'wss://172.16.1.253:24443/agent',
     code: 'expired-code',
     hostname: 'NEWBOX',
     fingerprint: `sha256:${'2'.repeat(64)}`,

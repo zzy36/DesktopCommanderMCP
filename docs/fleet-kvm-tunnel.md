@@ -32,16 +32,16 @@ ChatGPT custom MCP
 | fleet-mcp Linux KVM          |
 |                              |
 | tunnel-client                |
-|   -> 127.0.0.1:8787/mcp      |
+|   -> 127.0.0.1:24787/mcp      |
 |                              |
 | Fleet Gateway                |
-|   MCP:   127.0.0.1:8787      |
-|   Agent: 127.0.0.1:8788      |
-|   Admin: 127.0.0.1:8789      |
+|   MCP:   127.0.0.1:24787      |
+|   Agent: 127.0.0.1:24788      |
+|   Admin: 127.0.0.1:24789      |
 |                              |
 | Caddy / LAN TLS ingress      |
-|   :9443 /agent -> :8788      |
-|   :9443 /admin -> :8789      |
+|   :24443 /agent -> :24788      |
+|   :24443 /admin -> :24789      |
 +---------------+--------------+
                 |
                 | WSS on trusted LAN only
@@ -72,7 +72,7 @@ The optional Web Admin is also loopback-only behind Caddy. It is a LAN diagnosti
 
 For the private Tunnel prototype, use bearer authentication:
 
-- `tunnel-client` reaches `http://127.0.0.1:8787/mcp` inside the KVM.
+- `tunnel-client` reaches `http://127.0.0.1:24787/mcp` inside the KVM.
 - The bearer token is supplied through an environment variable such as `FLEET_MCP_BEARER_TOKEN`.
 - The token is not stored in Git or in the JSON config.
 
@@ -91,7 +91,7 @@ tunnel-client init \
   --sample sample_mcp_with_dcr \
   --profile network-fleet \
   --tunnel-id tunnel_... \
-  --mcp-server-url http://127.0.0.1:8787/mcp
+  --mcp-server-url http://127.0.0.1:24787/mcp
 
 tunnel-client doctor --profile network-fleet --explain
 tunnel-client run --profile network-fleet

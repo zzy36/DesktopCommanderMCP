@@ -2,20 +2,20 @@
 # Current trusted household subnet is 172.16.0.0/20. VPN ranges are intentionally excluded.
 # The certificate must be trusted by managed devices and match fleet-mcp.home.arpa.
 
-fleet-mcp.home.arpa:9443 {
+fleet-mcp.home.arpa:24443 {
     tls /etc/network-fleet/tls/fullchain.pem /etc/network-fleet/tls/privkey.pem
 
     @agent {
         path /agent
         remote_ip 172.16.0.0/20
     }
-    reverse_proxy @agent 127.0.0.1:8788
+    reverse_proxy @agent 127.0.0.1:24788
 
     @admin {
         path /admin /admin/* /pair/claim /pair/status
         remote_ip 172.16.0.0/20
     }
-    reverse_proxy @admin 127.0.0.1:8789
+    reverse_proxy @admin 127.0.0.1:24789
 
     respond 404
 }

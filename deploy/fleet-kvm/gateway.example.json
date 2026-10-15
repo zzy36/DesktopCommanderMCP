@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "mcp": {
     "listenHost": "127.0.0.1",
-    "listenPort": 8787,
+    "listenPort": 24787,
     "auth": {
       "type": "bearer",
       "tokenEnv": "FLEET_MCP_BEARER_TOKEN"
@@ -10,12 +10,12 @@
   },
   "agent": {
     "listenHost": "127.0.0.1",
-    "listenPort": 8788,
+    "listenPort": 24788,
     "path": "/agent"
   },
   "admin": {
     "listenHost": "127.0.0.1",
-    "listenPort": 8789,
+    "listenPort": 24789,
     "basePath": "/admin"
   },
   "stateDir": "/var/lib/network-fleet",
