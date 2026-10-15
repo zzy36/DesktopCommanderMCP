@@ -161,7 +161,7 @@ async function registerClient() {
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
       client_name: 'Fleet OAuth Test Client',
-      scope: 'fleet:read fleet:write',
+      scope: 'fleet:read fleet:write offline_access',
     }),
   });
   assert.equal(response.status, 201);
@@ -287,7 +287,7 @@ try {
   assert.equal(protectedMetadataResponse.status, 200);
   const protectedMetadata = await protectedMetadataResponse.json();
   assert.equal(protectedMetadata.resource, resourceUrl.href);
-  assert.deepEqual(protectedMetadata.scopes_supported.sort(), ['fleet:read', 'fleet:write'].sort());
+  assert.deepEqual(protectedMetadata.scopes_supported.sort(), ['fleet:read', 'fleet:write', 'offline_access'].sort());
 
   const authMetadataResponse = await fetch(new URL('/.well-known/oauth-authorization-server', issuerUrl));
   assert.equal(authMetadataResponse.status, 200);
@@ -306,7 +306,7 @@ try {
   assert.match(authenticateHeader, /resource_metadata=/i);
 
   const clientRegistration = await registerClient();
-  const fullTokens = await authorize(clientRegistration, ['fleet:read', 'fleet:write'], {
+  const fullTokens = await authorize(clientRegistration, ['fleet:read', 'fleet:write', 'offline_access'], {
     wrongPassword: true,
     wrongVerifier: true,
   });

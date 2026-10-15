@@ -30,7 +30,7 @@ const AUTHORIZATION_REQUEST_TTL_MS = 10 * 60 * 1000;
 const AUTHORIZATION_CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 5;
 
-export const FLEET_OAUTH_SCOPES = ['fleet:read', 'fleet:write'] as const;
+export const FLEET_OAUTH_SCOPES = ['fleet:read', 'fleet:write', 'offline_access'] as const;
 
 interface PersistedTokenRecord {
     clientId: string;
