@@ -1,11 +1,26 @@
 import assert from 'node:assert/strict';
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { createFleetAdminHttpServer } from '../dist/remote-device/fleet/admin-server.js';
+import { FleetEnrollmentStore } from '../dist/remote-device/fleet/enrollment-store.js';
 import { FleetGateway } from '../dist/remote-device/fleet/fleet-gateway.js';
 
+const temp = await mkdtemp(path.join(os.tmpdir(), 'fleet-admin-'));
 const devices = [{ hostname: 'YUAN', publicKeyFingerprint: `sha256:${'0'.repeat(64)}` }];
 const projects = [{ projectId: 'network.ikuai', hostname: 'YUAN', policyRevision: 'control@000000000000' }];
 const gateway = new FleetGateway({ devices, projects, heartbeatSweepMs: 60_000 });
-const server = createFleetAdminHttpServer(gateway, { basePath: '/admin', devices, projects });
+const enrollmentStore = new FleetEnrollmentStore(path.join(temp, 'enrollment.json'));
+await enrollmentStore.initialize();
+let approvedDevice = null;
+const server = createFleetAdminHttpServer(gateway, {
+  basePath: '/admin',
+  devices,
+  projects,
+  enrollmentStore,
+  onApproveDevice: async (device) => { approvedDevice = device; },
+});
 
 try {
   await new Promise((resolve, reject) => {
@@ -14,12 +29,13 @@ try {
   });
   const address = server.address();
   assert.ok(address && typeof address === 'object');
-  const base = `http://127.0.0.1:${address.port}/admin`;
+  const origin = `http://127.0.0.1:${address.port}`;
+  const base = `${origin}/admin`;
 
   let response = await fetch(base);
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /Local Remote MCP/);
+  assert.match(html, /Local Control MCP/);
   assert.match(html, /New device bootstrap/);
 
   response = await fetch(`${base}/api/status`);
@@ -35,18 +51,64 @@ try {
   response = await fetch(`${base}/api/bootstrap`);
   assert.equal(response.status, 200);
   const bootstrap = await response.json();
-  assert.match(bootstrap.commands.pairingBootstrap, /Register-LocalRemoteMcpDevice\.ps1/);
-  assert.match(bootstrap.commands.pairingBootstrap, /-PairingCode/);
-  assert.match(bootstrap.commands.existingApprovedDevice, /Register-LocalRemoteMcpDevice\.ps1/);
+  assert.match(bootstrap.commands.interactiveRemote, /Start-LCMRemote\.ps1/);
+  assert.match(bootstrap.commands.existingApprovedDevice, /Register-LocalControlMcpDevice\.ps1/);
   assert.match(bootstrap.note, /No account database is required/i);
+
+  // Official-style device authorization: start -> browser approve -> poll.
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  response = await fetch(`${origin}/device/start`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      client_id: 'lcm-device', device_name: 'NEWBOX', fingerprint: `sha256:${'2'.repeat(64)}`,
+      policy_revision: 'control@123456789abc', code_challenge: challenge, code_challenge_method: 'S256',
+    }),
+  });
+  assert.equal(response.status, 200);
+  const started = await response.json();
+  assert.match(started.user_code, /^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+  assert.equal(started.verification_uri, `${origin}/pair`);
+  assert.equal(started.verification_uri_complete, `${origin}/pair?code=${started.user_code}`);
+
+  response = await fetch(started.verification_uri_complete);
+  assert.equal(response.status, 200);
+  const approvalHtml = await response.text();
+  assert.match(approvalHtml, /NEWBOX/);
+  assert.match(approvalHtml, new RegExp(started.user_code));
+  assert.match(approvalHtml, /Approve this device/);
+
+  response = await fetch(`${origin}/device/poll`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ device_code: started.device_code, code_verifier: verifier }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, 'authorization_pending');
+
+  response = await fetch(`${origin}/pair/approve`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: started.user_code }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal(approvedDevice.hostname, 'NEWBOX');
+
+  response = await fetch(`${origin}/device/poll`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ device_code: started.device_code, code_verifier: verifier }),
+  });
+  assert.equal(response.status, 200);
+  const verified = await response.json();
+  assert.equal(verified.status, 'approved');
+  assert.equal(verified.device_id, 'NEWBOX');
+  assert.equal(verified.credential_type, 'ed25519');
 
   response = await fetch(`${base}/api/calls?limit=9999`);
   assert.equal(response.status, 200);
-  const calls = await response.json();
-  assert.deepEqual(calls.calls, []);
+  assert.deepEqual((await response.json()).calls, []);
 
-  console.log('fleet admin web tests passed');
+  console.log('fleet admin web + device authorization tests passed');
 } finally {
   await gateway.stop().catch(() => undefined);
   if (server.listening) await new Promise((resolve) => server.close(() => resolve()));
+  await rm(temp, { recursive: true, force: true });
 }

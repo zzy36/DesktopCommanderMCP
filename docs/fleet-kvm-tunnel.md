@@ -113,23 +113,25 @@ Do not fill them from stale chat history. Read them from the live Agent provisio
 
 ## Agent provisioning
 
-Managed Windows devices should use the canonical L1 bootstrap instead of cloning this project manually:
+Managed Windows devices use the canonical L1 entry point instead of cloning this project manually:
 
 ```powershell
-pwsh -NoProfile -File <CONTROL_ROOT>\tools\Register-LocalRemoteMcpDevice.ps1 -Json
+lcm remote
+# or, before the thin CLI shim is on PATH:
+pwsh -NoProfile -File <CONTROL_ROOT>\tools\Start-LCMRemote.ps1
 ```
 
-The first pass installs/updates the shared Local Remote MCP runtime and plugin, provisions the CA and Agent identity/config, and returns the canonical hostname, Ed25519 public-key fingerprint and current policy revision. After that identity is approved in the Gateway, rerun with `-InstallTask -StartNow` to register the PowerShell 7 SYSTEM startup task.
+First use mirrors the hosted RDC device experience but stays self-hosted: the device creates/loads its Ed25519 identity, creates a PKCE challenge, requests a short-lived `XXXX-XXXX` verification code from the KVM, opens the local verification page, and polls until the user approves the matching hostname/code/fingerprint. The Ed25519 private key never leaves the device. Future runs restore the approved identity without another browser step. The canonical bootstrap also installs the SYSTEM startup Agent task. Legacy `-PairingCode` enrollment remains compatibility-only.
 
 The permanent Agent uses the exact host-specific identity and `.control` authorization. A Local or Official transport failure never permits routing to a different D0 device.
 
 ## Acceptance gate before cutover
 
-The local remote MCP is not a replacement until all of these pass:
+LCM is not a complete replacement until all of these pass:
 
-- ChatGPT discovery through Secure MCP Tunnel;
+- ordinary ChatGPT discovery through the final approved remote MCP transport;
 - exact `network.ikuai -> YUAN` routing;
-- `fleet_status`, `list_devices`, `read_test_file`, and `write_test_file` through the full chain;
+- the 26-tool remote contract through the full Gateway -> Agent chain, including project tools, status/device discovery, and remote call status/history;
 - HEMA rejected for `network.ikuai`;
 - path injection rejected;
 - stale `.control` revision rejected;

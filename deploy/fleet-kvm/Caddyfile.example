@@ -1,4 +1,4 @@
-# LAN-only ingress for the self-hosted Local Remote MCP control plane.
+# LAN-only ingress for the self-hosted Local Control MCP control plane.
 # Current trusted household subnet is 172.16.0.0/20. VPN ranges are intentionally excluded.
 # The certificate must be trusted by managed devices and match fleet-mcp.home.arpa.
 
@@ -12,7 +12,7 @@ fleet-mcp.home.arpa:24443 {
     reverse_proxy @agent 127.0.0.1:24788
 
     @admin {
-        path /admin /admin/* /pair/claim /pair/status
+        path /admin /admin/* /device/start /device/poll /pair /pair/*
         remote_ip 172.16.0.0/20
     }
     reverse_proxy @admin 127.0.0.1:24789

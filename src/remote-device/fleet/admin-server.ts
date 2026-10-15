@@ -54,6 +54,57 @@ async function handleRequest(
         const pairing = await options.enrollmentStore.createPairing(String(body.hostname ?? ''));
         return sendJson(res, 201, pairing);
     }
+    if (req.method === 'POST' && url.pathname === '/device/start') {
+        if (!options.enrollmentStore) return sendJson(res, 404, { error: 'device authorization is disabled' });
+        const body = await readJsonBody(req);
+        if (String(body.code_challenge_method ?? 'S256') !== 'S256') return sendJson(res, 400, { error: 'unsupported_code_challenge_method' });
+        const authorization = await options.enrollmentStore.createDeviceAuthorization({
+            hostname: String(body.device_name ?? body.hostname ?? ''),
+            fingerprint: String(body.fingerprint ?? ''),
+            policyRevision: String(body.policy_revision ?? body.policyRevision ?? ''),
+            codeChallenge: String(body.code_challenge ?? ''),
+        });
+        const origin = externalOrigin(req);
+        return sendJson(res, 200, {
+            device_code: authorization.deviceCode,
+            user_code: authorization.userCode,
+            verification_uri: `${origin}/pair`,
+            verification_uri_complete: `${origin}/pair?code=${encodeURIComponent(authorization.userCode)}`,
+            expires_in: Math.max(1, Math.floor((authorization.expiresAtMs - Date.now()) / 1000)),
+            interval: 2,
+        });
+    }
+    if (req.method === 'POST' && url.pathname === '/device/poll') {
+        if (!options.enrollmentStore) return sendJson(res, 404, { error: 'device authorization is disabled' });
+        const body = await readJsonBody(req);
+        const authorization = await options.enrollmentStore.pollDeviceAuthorization({
+            deviceCode: String(body.device_code ?? ''),
+            codeVerifier: String(body.code_verifier ?? ''),
+        });
+        if (authorization.status === 'pending') return sendJson(res, 400, { error: 'authorization_pending' });
+        if (authorization.status === 'expired') return sendJson(res, 400, { error: 'expired_token' });
+        return sendJson(res, 200, {
+            status: 'approved',
+            device_id: authorization.hostname,
+            hostname: authorization.hostname,
+            public_key_fingerprint: authorization.fingerprint,
+            policy_revision: authorization.policyRevision,
+            credential_type: 'ed25519',
+        });
+    }
+    if (req.method === 'GET' && url.pathname === '/pair') {
+        if (!options.enrollmentStore) return sendHtml(res, 404, '<h1>Device authorization disabled</h1>');
+        const code = url.searchParams.get('code') ?? '';
+        const authorization = code ? options.enrollmentStore.getDeviceAuthorizationByUserCode(code) : null;
+        return sendHtml(res, authorization ? 200 : (code ? 404 : 200), renderDeviceApprovalHtml(code, authorization));
+    }
+    if (req.method === 'POST' && url.pathname === '/pair/approve') {
+        if (!options.enrollmentStore || !options.onApproveDevice) return sendJson(res, 404, { error: 'device authorization is disabled' });
+        const body = await readJsonBody(req);
+        const approved = await options.enrollmentStore.approveDeviceAuthorizationByUserCode(String(body.code ?? ''));
+        await options.onApproveDevice(approved.device);
+        return sendJson(res, 200, { ok: true, authorization: approved.authorization, device: approved.device });
+    }
     if (req.method === 'POST' && url.pathname === '/pair/claim') {
         if (!options.enrollmentStore) return sendJson(res, 404, { error: 'pairing is disabled' });
         const body = await readJsonBody(req);
@@ -85,6 +136,33 @@ async function handleRequest(
     return sendJson(res, 404, { error: 'not found' });
 }
 
+function externalOrigin(req: IncomingMessage): string {
+    const forwardedProto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim();
+    const proto = forwardedProto || ((req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http');
+    const forwardedHost = String(req.headers['x-forwarded-host'] ?? '').split(',')[0].trim();
+    const host = forwardedHost || String(req.headers.host ?? 'fleet-mcp.home.arpa:24443');
+    return `${proto}://${host}`;
+}
+
+function renderDeviceApprovalHtml(code: string, authorization: ReturnType<FleetEnrollmentStore['getDeviceAuthorizationByUserCode']>): string {
+    const safeCode = escapeHtml(code);
+    if (!code) {
+        return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LCM device verification</title></head><body style="font-family:system-ui;max-width:680px;margin:60px auto;padding:0 20px"><h1>Local Control MCP</h1><p>Enter the verification code shown in PowerShell.</p><form method="get" action="/pair"><input name="code" autocomplete="one-time-code" placeholder="ABCD-EFGH" style="font-size:24px;padding:10px"><button style="font-size:18px;padding:12px;margin-left:8px">Continue</button></form></body></html>`;
+    }
+    if (!authorization) {
+        return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LCM device verification</title></head><body style="font-family:system-ui;max-width:680px;margin:60px auto;padding:0 20px"><h1>Code not found</h1><p>The code <b>${safeCode}</b> is invalid or expired.</p></body></html>`;
+    }
+    const canApprove = authorization.status === 'pending';
+    const status = escapeHtml(authorization.status);
+    const host = escapeHtml(authorization.hostname);
+    const fingerprint = escapeHtml(authorization.fingerprint);
+    const policy = escapeHtml(authorization.policyRevision);
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LCM device verification</title><style>body{font-family:system-ui;background:#101214;color:#eef2f6;max-width:760px;margin:50px auto;padding:0 20px}.card{background:#181c20;border:1px solid #30363d;border-radius:16px;padding:24px}code{word-break:break-all}button{padding:12px 18px;border:0;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer}.muted{color:#a9b2bd}.ok{color:#66d19e}</style></head><body><h1>Local Control MCP</h1><div class="card"><p class="muted">Verify that the device and code match the PowerShell window.</p><h2>${host}</h2><p>Verification code: <b style="font-size:24px">${safeCode}</b></p><p>Fingerprint: <code>${fingerprint}</code></p><p>Policy: <code>${policy}</code></p><p>Status: <b id="status">${status}</b></p>${canApprove ? '<button id="approve">Approve this device</button>' : ''}<p id="message" class="ok"></p></div><script>${canApprove ? `document.getElementById('approve').onclick=async()=>{const b=document.getElementById('approve');b.disabled=true;const r=await fetch('/pair/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:${JSON.stringify(code)}})});const d=await r.json();if(r.ok){document.getElementById('status').textContent='approved';document.getElementById('message').textContent='Device approved. Return to PowerShell.';b.remove()}else{document.getElementById('message').textContent='ERROR: '+(d.error||r.status);b.disabled=false}};` : ''}</script></body></html>`;
+}
+
+function escapeHtml(value: string): string {
+    return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char));
+}
 function buildStatus(gateway: FleetGateway, options: FleetAdminServerOptions) {
     const projectsByHost = new Map<string, string>();
     for (const project of options.projects) {
@@ -112,16 +190,16 @@ function redactCalls(records: FleetGatewayCallRecord[]) {
 function bootstrapGuide() {
     return {
         flow: [
-            'Create a short-lived pairing code in this LAN/VPN-only Web Admin.',
-            'On the new managed Windows device, run the PowerShell 7 bootstrap command once.',
-            'The device creates its own Ed25519 identity and claims the pairing code; the private key never leaves the device.',
-            'Review hostname + fingerprint here, then approve the device identity.',
+            'Run Start-LCMRemote.ps1 (or lcm remote) on the managed Windows device.',
+            'The device creates its own Ed25519 identity plus a PKCE challenge, requests a short-lived verification code, and opens the browser.',
+            'Verify hostname + fingerprint + code in the browser, then approve the device identity.',
+            'PowerShell polls until approval; the private key never leaves the device.',
             'The bootstrap installs the Local MCP plugin plus a SYSTEM AtStartup Fleet Agent task. Project access still comes only from canonical .control.',
             'Validate one allowed project and one denied project. Official Remote MCP remains same-project/same-D0 fallback only.',
         ],
         commands: {
-            pairingBootstrap: 'pwsh -NoProfile -File "<CONTROL_ROOT>\\tools\\Register-LocalRemoteMcpDevice.ps1" -PairingCode "<PAIR_CODE>" -Json -InstallTask -StartNow',
-            existingApprovedDevice: 'pwsh -NoProfile -File "<CONTROL_ROOT>\\tools\\Register-LocalRemoteMcpDevice.ps1" -Json -InstallTask -StartNow',
+            interactiveRemote: 'pwsh -NoProfile -File "<CONTROL_ROOT>\\tools\\Start-LCMRemote.ps1"',
+            existingApprovedDevice: 'pwsh -NoProfile -File "<CONTROL_ROOT>\\tools\\Register-LocalControlMcpDevice.ps1" -Json -InstallTask -StartNow',
             validateR0: 'pwsh -NoProfile -File "<CONTROL_ROOT>\\tools\\Validate-R0DesktopProfile.ps1"',
         },
         note: 'No account database is required. Pairing is device identity admission only; it never grants project permissions or bypasses .control.',
@@ -176,9 +254,9 @@ function sendHtml(res: ServerResponse, status: number, body: string): void {
 function renderAdminHtml(basePath: string): string {
     const api = JSON.stringify(basePath);
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Local Remote MCP</title><style>
+<title>Local Control MCP</title><style>
 :root{font-family:Inter,system-ui,sans-serif;color-scheme:light dark}body{margin:0;background:#101214;color:#eef2f6}.wrap{max-width:1180px;margin:auto;padding:32px 20px}h1{font-size:30px;margin:0}.sub{color:#a9b2bd;margin:8px 0 28px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}.card{background:#181c20;border:1px solid #2a3037;border-radius:14px;padding:18px}.big{font-size:28px;font-weight:700}.ok{color:#66d19e}.bad{color:#ff8f8f}.warn{color:#ffd479}table{width:100%;border-collapse:collapse}.panel{margin-top:18px}.panel h2{font-size:18px}th,td{text-align:left;padding:10px;border-bottom:1px solid #2a3037;font-size:13px}code,pre,input{font-family:ui-monospace,Consolas,monospace}pre{white-space:pre-wrap;background:#0d0f11;padding:14px;border-radius:10px;overflow:auto}button{background:#e8edf2;color:#111;border:0;border-radius:9px;padding:9px 14px;font-weight:650;cursor:pointer}input{background:#0d0f11;color:#eef2f6;border:1px solid #38414b;border-radius:9px;padding:9px 11px;min-width:220px}.muted{color:#8e99a6}.pill{padding:3px 8px;border-radius:999px;background:#283039;display:inline-block;font-size:12px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}</style></head>
-<body><div class="wrap"><h1>Local Remote MCP</h1><div class="sub">Trusted-home-LAN single-tenant control plane · no account database · execution remains behind MCP + .control</div>
+<body><div class="wrap"><h1>Local Control MCP</h1><div class="sub">Self-hosted device authorization and project-scoped control · no hosted RDC account required</div>
 <div class="grid"><div class="card"><div class="muted">Gateway</div><div class="big ok" id="gateway">Checking…</div></div><div class="card"><div class="muted">Devices online</div><div class="big" id="online">—</div></div><div class="card"><div class="muted">Projects</div><div class="big" id="projects">—</div></div><div class="card"><div class="muted">Updated</div><div class="big" style="font-size:16px" id="updated">—</div></div></div>
 <div class="panel card"><h2>Devices</h2><table><thead><tr><th>Device</th><th>Status</th><th>Project</th><th>Policy</th><th>Last seen</th></tr></thead><tbody id="devices"></tbody></table></div>
 <div class="panel card"><h2>Add device</h2><p class="muted">Create a short-lived pairing code. The device generates its own private key; only the fingerprint is approved here. Project permissions are never granted by pairing.</p><div class="row"><input id="pairHost" placeholder="HOSTNAME"><button id="createPair">Create 10-minute pairing</button></div><pre id="pairOutput">No pairing created.</pre><table><thead><tr><th>Host</th><th>Status</th><th>Fingerprint</th><th>Expires</th><th>Action</th></tr></thead><tbody id="pairings"></tbody></table></div>
