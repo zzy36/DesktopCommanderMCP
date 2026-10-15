@@ -17,6 +17,7 @@ import { FleetRouter } from '../dist/remote-device/fleet/router.js';
 import { DesktopCommanderIntegration } from '../dist/remote-device/desktop-commander-integration.js';
 import { createFleetPluginHttpServer } from '../dist/remote-device/fleet/plugin-server.js';
 import { ControlPolicyAuthorizer } from '../dist/remote-device/fleet/control-policy.js';
+import { LCM_PROJECT_TOOLS } from '../dist/remote-device/fleet/project-tool-contract.js';
 
 const PROJECT_ID = 'network.ikuai';
 const HOSTNAME = 'YUAN';
@@ -207,20 +208,10 @@ const backend = {
     }
   },
 
-  async readTestFile(projectId, hostname) {
-    const response = await dispatch(projectId, hostname, 'read_file', { path: testFile });
+  async callProjectTool(projectId, hostname, toolName, args) {
+    const response = await dispatch(projectId, hostname, toolName, args);
     if (!response.ok) throw Object.assign(new Error(response.error ?? response.code), { code: response.code });
-    return firstText(response.result);
-  },
-
-  async writeTestFile(projectId, hostname, content) {
-    const response = await dispatch(projectId, hostname, 'write_file', {
-      path: testFile,
-      content,
-      mode: 'rewrite',
-    });
-    if (!response.ok) throw Object.assign(new Error(response.error ?? response.code), { code: response.code });
-    return { bytesWritten: Buffer.byteLength(content, 'utf8') };
+    return response.result;
   },
 };
 
@@ -235,14 +226,14 @@ const health = await fetch(`${baseUrl}/healthz`);
 assert.equal(health.status, 200);
 assert.equal((await health.json()).ok, true);
 
-const client = new Client({ name: 'fleet-plugin-poc-client', version: '0.1.0' });
+const client = new Client({ name: 'lcm-remote-http-client', version: '0.3.0' });
 const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`));
 await client.connect(transport);
 
 const listed = await client.listTools();
 assert.deepEqual(
   listed.tools.map((tool) => tool.name).sort(),
-  ['fleet_status', 'list_devices', 'read_test_file', 'write_test_file'].sort(),
+  ['fleet_status', 'list_devices', ...LCM_PROJECT_TOOLS].sort(),
 );
 
 const status = await client.callTool({
@@ -254,22 +245,22 @@ assert.match(firstText(status), /"online": true/);
 
 const probe = `fleet-plugin-write-ok-${randomUUID()}`;
 const writeResult = await client.callTool({
-  name: 'write_test_file',
-  arguments: { project_id: PROJECT_ID, hostname: HOSTNAME, content: probe },
+  name: 'write_file',
+  arguments: { project_id: PROJECT_ID, hostname: HOSTNAME, path: testFile, content: probe, mode: 'rewrite' },
 });
 assert.equal(writeResult.isError, undefined);
 assert.equal(await readFile(testFile, 'utf8'), probe);
 
 const readResult = await client.callTool({
-  name: 'read_test_file',
-  arguments: { project_id: PROJECT_ID, hostname: HOSTNAME },
+  name: 'read_file',
+  arguments: { project_id: PROJECT_ID, hostname: HOSTNAME, path: testFile },
 });
 assert.equal(readResult.isError, undefined);
 assert.match(firstText(readResult), new RegExp(probe));
 
 const wrongHost = await client.callTool({
-  name: 'write_test_file',
-  arguments: { project_id: PROJECT_ID, hostname: 'HEMA', content: 'must-not-write' },
+  name: 'write_file',
+  arguments: { project_id: PROJECT_ID, hostname: 'HEMA', path: testFile, content: 'must-not-write', mode: 'rewrite' },
 });
 assert.equal(wrongHost.isError, true);
 assert.equal(await readFile(testFile, 'utf8'), probe);
@@ -286,4 +277,4 @@ if (controlPolicy) await controlPolicy.stop();
 await new Promise((resolve) => wsServer.close(resolve));
 await rm(testRoot, { recursive: true, force: true });
 
-console.log('fleet plugin HTTP write PoC passed');
+console.log('LCM remote HTTP 22-tool contract passed');

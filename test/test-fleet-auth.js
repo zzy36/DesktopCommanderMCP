@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createFleetPluginHttpServer } from '../dist/remote-device/fleet/plugin-server.js';
+import { LCM_PROJECT_TOOLS } from '../dist/remote-device/fleet/project-tool-contract.js';
 
 const TOKEN = 'fleet-test-secret';
 const backend = {
@@ -64,15 +65,15 @@ await client.connect(transport);
 const tools = await client.listTools();
 assert.deepEqual(
   tools.tools.map((tool) => tool.name).sort(),
-  ['fleet_status', 'list_devices', 'read_test_file', 'write_test_file'].sort(),
+  ['fleet_status', 'list_devices', ...LCM_PROJECT_TOOLS].sort(),
 );
 
 const result = await client.callTool({
-  name: 'write_test_file',
-  arguments: { project_id: 'network.ikuai', hostname: 'YUAN', content: 'auth-ok' },
+  name: 'fleet_status',
+  arguments: { project_id: 'network.ikuai', hostname: 'YUAN' },
 });
 assert.equal(result.isError, undefined);
-assert.match(result.content?.[0]?.text ?? '', /"bytesWritten": 7/);
+assert.match(result.content?.[0]?.text ?? '', /"online": true/);
 
 await client.close();
 await new Promise((resolve) => server.close(resolve));

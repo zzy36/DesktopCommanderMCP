@@ -10,6 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { MemoryAuditSink } from '../dist/remote-device/fleet/audit-log.js';
 import { ControlPolicyAuthorizer } from '../dist/remote-device/fleet/control-policy.js';
+import { LCM_PROJECT_TOOLS } from '../dist/remote-device/fleet/project-tool-contract.js';
 import { DeviceIdentityStore } from '../dist/remote-device/fleet/device-identity.js';
 import { FleetAgent, createDedicatedTestFilePolicy } from '../dist/remote-device/fleet/fleet-agent.js';
 import { FleetGateway } from '../dist/remote-device/fleet/fleet-gateway.js';
@@ -308,20 +309,20 @@ try {
   const tools = await fullClient.listTools();
   assert.deepEqual(
     tools.tools.map((tool) => tool.name).sort(),
-    ['fleet_status', 'list_devices', 'read_test_file', 'write_test_file'].sort(),
+    ['fleet_status', 'list_devices', ...LCM_PROJECT_TOOLS].sort(),
   );
 
   const probe = `oauth-write-ok-${Date.now()}`;
   const write = await fullClient.callTool({
-    name: 'write_test_file',
-    arguments: { project_id: 'network.ikuai', hostname: 'YUAN', content: probe },
+    name: 'write_file',
+    arguments: { project_id: 'network.ikuai', hostname: 'YUAN', path: probeFile, content: probe, mode: 'rewrite' },
   });
   assert.equal(write.isError, undefined);
   assert.equal(await readFile(probeFile, 'utf8'), probe);
 
   const read = await fullClient.callTool({
-    name: 'read_test_file',
-    arguments: { project_id: 'network.ikuai', hostname: 'YUAN' },
+    name: 'read_file',
+    arguments: { project_id: 'network.ikuai', hostname: 'YUAN', path: probeFile },
   });
   assert.equal(read.isError, undefined);
   assert.match(firstText(read), new RegExp(probe));
@@ -329,13 +330,13 @@ try {
   const readOnlyTokens = await authorize(clientRegistration, ['fleet:read']);
   readOnlyClient = await mcpClientWithToken(readOnlyTokens.access_token);
   const readOnlyRead = await readOnlyClient.callTool({
-    name: 'read_test_file',
-    arguments: { project_id: 'network.ikuai', hostname: 'YUAN' },
+    name: 'read_file',
+    arguments: { project_id: 'network.ikuai', hostname: 'YUAN', path: probeFile },
   });
   assert.equal(readOnlyRead.isError, undefined);
   const deniedWrite = await readOnlyClient.callTool({
-    name: 'write_test_file',
-    arguments: { project_id: 'network.ikuai', hostname: 'YUAN', content: 'must-not-write-readonly' },
+    name: 'write_file',
+    arguments: { project_id: 'network.ikuai', hostname: 'YUAN', path: probeFile, content: 'must-not-write-readonly', mode: 'rewrite' },
   });
   assert.equal(deniedWrite.isError, true);
   assert.match(firstText(deniedWrite), /fleet:write/);

@@ -1,6 +1,5 @@
 import express, { Request, Response } from 'express';
 import { createServer } from 'node:http';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
     getOAuthProtectedResourceMetadataUrl,
@@ -125,7 +124,7 @@ async function handleAuthenticatedMcp(
     req: Request,
     res: Response,
 ): Promise<void> {
-    let server: McpServer | null = null;
+    let server: ReturnType<typeof createFleetPluginMcpServer> | null = null;
     let transport: StreamableHTTPServerTransport | null = null;
     try {
         server = createFleetPluginMcpServer(backend, { enforceOAuthScopes: true });

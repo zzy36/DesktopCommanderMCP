@@ -60,6 +60,17 @@ export class FleetGatewayPluginBackend implements FleetPluginBackend {
         }));
     }
 
+    async callProjectTool(
+        projectId: string,
+        hostnameInput: string,
+        toolName: string,
+        args: Record<string, unknown>,
+    ): Promise<unknown> {
+        const hostname = canonicalHostname(hostnameInput);
+        return this.gateway.dispatch(projectId, hostname, toolName, { ...args }, this.callTimeoutMs);
+    }
+
+    // Migration-only probe helpers. They are no longer exposed on the user-facing MCP surface.
     async readTestFile(projectId: string, hostnameInput: string): Promise<string> {
         const probe = this.requireProbe(projectId, hostnameInput);
         const result = await this.gateway.dispatch(
