@@ -28,7 +28,7 @@ function sleep(ms: number): Promise<void> { return new Promise((resolve) => setT
 
 function requireArg(name: string): string {
     const value = arg(name);
-    if (!value) throw new Error(`${name} is required`);
+    if (!value) throw new Error(`${name} 为必填参数`);
     return value;
 }
 
@@ -45,7 +45,7 @@ async function postJson(url: string, body: Record<string, unknown>): Promise<{ s
 
 async function main(): Promise<void> {
     if (has('--help') || has('-h')) {
-        console.log(`Local Control MCP device authorization\n\nUsage:\n  node device-auth-client.js --admin-url https://HOST:PORT/admin --hostname HOST --fingerprint sha256:... --policy-revision control@... [--no-open] [--json]\n`);
+        console.log(`Local Control MCP 设备验证\n\n用法:\n  node device-auth-client.js --admin-url https://HOST:PORT/admin --hostname HOST --fingerprint sha256:... --policy-revision control@... [--no-open] [--json]\n`);
         return;
     }
     const adminUrl = new URL(requireArg('--admin-url'));
@@ -70,19 +70,19 @@ async function main(): Promise<void> {
     const auth = started.body as StartResponse;
 
     if (!json) {
-        console.log('🔐 Connecting this computer to Local Control MCP...\n');
-        console.log('📋 Please complete authentication:\n');
-        console.log('   1. Verify this device in your browser:');
+        console.log('🔐 正在将这台电脑连接到 Local Control MCP...\n');
+        console.log('📋 请完成设备验证：\n');
+        console.log('   1. 请在浏览器中确认这台设备：');
         console.log(`      ${auth.verification_uri_complete}\n`);
-        console.log('   2. Make sure the code matches:');
+        console.log('   2. 请确认验证码一致：');
         console.log(`      ${auth.user_code}\n`);
-        console.log(`   Code expires in ${Math.max(1, Math.floor(auth.expires_in / 60))} minutes.\n`);
+        console.log(`   验证码将在 ${Math.max(1, Math.floor(auth.expires_in / 60))} 分钟后过期。\n`);
     }
     if (!has('--no-open')) {
         try { await open(auth.verification_uri_complete); }
-        catch { if (!json) console.log(`   Could not open the browser automatically. Visit: ${auth.verification_uri}`); }
+        catch { if (!json) console.log(`   无法自动打开浏览器，请手动访问： ${auth.verification_uri}`); }
     }
-    if (!json) console.log('   - ⏳ Waiting for authorization...\n');
+    if (!json) console.log('   - ⏳ 正在等待浏览器确认...\n');
 
     const intervalMs = Math.max(1000, (auth.interval ?? 2) * 1000);
     const deadline = Date.now() + Math.max(10_000, auth.expires_in * 1000);
@@ -97,19 +97,19 @@ async function main(): Promise<void> {
             const result = polled.body as PollResponse;
             if (json) console.log(JSON.stringify({ user_code: auth.user_code, ...result }));
             else {
-                console.log('✅ Device verified\n');
-                console.log(`   Device:      ${result.hostname}`);
-                console.log(`   Fingerprint: ${result.public_key_fingerprint}`);
-                console.log('   Identity:    Ed25519 (local private key retained on this device)\n');
+                console.log('✅ 设备验证成功\n');
+                console.log(`   设备：       ${result.hostname}`);
+                console.log(`   指纹：       ${result.public_key_fingerprint}`);
+                console.log('   身份：       Ed25519（私钥仅保留在本机）\n');
             }
             return;
         }
         const error = polled.body?.error;
         if (error === 'authorization_pending' || error === 'slow_down') continue;
-        if (error === 'expired_token') throw new Error('Authorization code expired');
+        if (error === 'expired_token') throw new Error('设备验证码已过期');
         throw new Error(polled.body?.error_description ?? error ?? `device/poll failed: HTTP ${polled.status}`);
     }
-    throw new Error('Authorization timeout - user did not approve within the time limit');
+    throw new Error('设备验证超时：未在有效时间内完成浏览器确认');
 }
 
 main().catch((error) => {

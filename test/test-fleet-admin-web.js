@@ -36,7 +36,7 @@ try {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Local Control MCP/);
-  assert.match(html, /New device bootstrap/);
+  assert.match(html, /新设备引导/);
 
   response = await fetch(`${base}/api/status`);
   assert.equal(response.status, 200);
@@ -53,7 +53,7 @@ try {
   const bootstrap = await response.json();
   assert.match(bootstrap.commands.interactiveRemote, /Start-LCMRemote\.ps1/);
   assert.match(bootstrap.commands.existingApprovedDevice, /Register-LocalControlMcpDevice\.ps1/);
-  assert.match(bootstrap.note, /No account database is required/i);
+  assert.match(bootstrap.note, /不需要账号数据库/);
 
   // Official-style device authorization: start -> browser approve -> poll.
   const verifier = randomBytes(32).toString('base64url');
@@ -71,12 +71,18 @@ try {
   assert.equal(started.verification_uri, `${origin}/pair`);
   assert.equal(started.verification_uri_complete, `${origin}/pair?code=${started.user_code}`);
 
-  response = await fetch(started.verification_uri_complete);
+  response = await fetch(started.verification_uri_complete, { headers: { 'accept-language': 'zh-CN,zh;q=0.9' } });
   assert.equal(response.status, 200);
   const approvalHtml = await response.text();
   assert.match(approvalHtml, /NEWBOX/);
   assert.match(approvalHtml, new RegExp(started.user_code));
-  assert.match(approvalHtml, /Approve this device/);
+  assert.match(approvalHtml, /批准此设备/);
+  assert.match(approvalHtml, /请确认下面的设备、验证码和 PowerShell 窗口中显示的信息完全一致/);
+
+  response = await fetch(started.verification_uri_complete, { headers: { 'accept-language': 'en-US,en;q=0.9' } });
+  assert.equal(response.status, 200);
+  const englishApprovalHtml = await response.text();
+  assert.match(englishApprovalHtml, /Approve this device/);
 
   response = await fetch(`${origin}/device/poll`, {
     method: 'POST', headers: { 'content-type': 'application/json' },

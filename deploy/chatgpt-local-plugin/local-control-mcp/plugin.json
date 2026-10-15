@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "local-control-mcp",
-  "version": "0.3.2",
-  "description": "Primary Local Control MCP for project-authorized file, search and terminal control. Global routing may use the hosted Official Remote MCP only after a confirmed same-target Local runtime/startup/transport failure.",
+  "version": "0.3.3",
+  "description": "LCM 本地控制插件：以本地自托管链路作为项目授权的文件、搜索、终端和远程设备控制主通道；仅在同项目、同设备的本地运行时/启动/传输确认故障后，才允许按 L1 策略回退到官方 Remote MCP。",
   "keywords": [
     "mcp",
     "remote",
@@ -14,9 +14,9 @@
     "com.openai": {
       "requires_local_executor": true,
       "interface": {
-        "displayName": "Local Control MCP",
-        "shortDescription": "Self-hosted project-scoped machine control",
-        "longDescription": "Use Local Control MCP as the primary machine-control path. Every local tool call is re-authorized through local .control; same-target Official fallback is allowed only after confirmed Local runtime/startup/transport failure under L1 policy.",
+        "displayName": "Local Control MCP（LCM）",
+        "shortDescription": "自托管、项目隔离的本地与远程设备控制",
+        "longDescription": "LCM 是本地优先的 MCP 控制通道。每次工具调用都通过本机 .control 重新授权；官方 Remote MCP 仅作为同项目、同 D0 且本地运行时/启动/传输确认故障后的备用通道。",
         "developerName": "LCM",
         "category": "Developer Tools",
         "capabilities": [
