@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { writeFile, rm, mkdtemp, mkdir } from 'node:fs/promises';
+import { writeFile, rm, mkdtemp, mkdir, readFile } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
@@ -24,6 +24,10 @@ const client = new Client({ name: 'local-control-mcp-launcher-test', version: '0
 
 try {
   await client.connect(transport);
+  const rootManifest = JSON.parse(await readFile(path.join(repoRoot, 'deploy/chatgpt-local-plugin/local-control-mcp/plugin.json'), 'utf8'));
+  const compatibility = JSON.parse(await readFile(path.join(repoRoot, 'deploy/chatgpt-local-plugin/local-control-mcp/.codex-plugin/plugin.json'), 'utf8'));
+  assert.equal(compatibility.version, rootManifest.version, 'both plugin manifests must agree');
+  assert.equal(client.getServerVersion().version, rootManifest.version, 'actual stdio server handshake must match the release manifest');
   const tools = await client.listTools();
   assert.equal(tools.tools.length, 20);
   const result = await client.callTool({

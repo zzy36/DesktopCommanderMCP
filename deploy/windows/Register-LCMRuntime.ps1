@@ -179,17 +179,27 @@ if($existingMarket.Count -eq 1){
 }
 if($existingMarket.Count -eq 0){Invoke-Checked $codex @('plugin','marketplace','add',$marketRoot,'--json') 'marketplace add'}
 
-# `codex plugin list --json` can hang on HEMA. `plugin add` is idempotent and
-# returns the installed version/path, so use it directly and verify the cache manifest.
-$addRaw=(& $codex plugin add $pluginId --json | Out-String)
-if($LASTEXITCODE -ne 0){throw "plugin add failed with exit code $LASTEXITCODE"}
-$add=$addRaw|ConvertFrom-Json
-if([string]$add.pluginId -ne $pluginId){throw 'Local Control MCP plugin id mismatch after add.'}
-if([string]$add.version -ne $wantedVersion){throw "Local Control MCP plugin version mismatch after add: $($add.version) != $wantedVersion"}
-$installedPath=[string]$add.installedPath
-if(-not $installedPath -or -not(Test-Path -LiteralPath $installedPath)){throw 'Local Control MCP installed path missing after plugin add.'}
+# Marketplace refresh can already install an enabled plugin. Verify every
+# pinned file, including hidden compatibility metadata, before replacement.
+$installedPath=Join-Path $env:USERPROFILE ('.codex\plugins\cache\'+$marketName+'\local-control-mcp\'+$wantedVersion)
+function Test-PinnedPluginCache {
+  if(-not(Test-Path -LiteralPath $installedPath)){return $false}
+  foreach($file in Get-ChildItem -LiteralPath $template -Recurse -File -Force){
+    $relative=[IO.Path]::GetRelativePath($template,$file.FullName)
+    $cached=Join-Path $installedPath $relative
+    if(-not(Test-Path -LiteralPath $cached) -or (Get-FileHash -LiteralPath $cached).Hash -ne (Get-FileHash -LiteralPath $file.FullName).Hash){return $false}
+  }
+  $enabledPattern='(?ms)^\[plugins\."'+[regex]::Escape($pluginId)+'"\]\s*\r?\n(?:(?!^\[).)*?^enabled\s*=\s*true\s*$'
+  return (Test-Path -LiteralPath $codexConfig) -and ([IO.File]::ReadAllText($codexConfig) -match $enabledPattern)
+}
+if(-not(Test-PinnedPluginCache)){
+  $addRaw=(& $codex plugin add $pluginId --json | Out-String)
+  $addExit=$LASTEXITCODE
+  if(-not(Test-PinnedPluginCache)){throw "plugin installation/cache verification failed (CLI exit $addExit)"}
+}
 $installedManifest=Get-Content -LiteralPath (Join-Path $installedPath 'plugin.json') -Raw -Encoding UTF8|ConvertFrom-Json
-if([string]$installedManifest.name -ne 'local-control-mcp' -or [string]$installedManifest.version -ne $wantedVersion){throw 'Local Control MCP cache manifest mismatch after plugin add.'}
+$compatibilityManifest=Get-Content -LiteralPath (Join-Path $installedPath '.codex-plugin\plugin.json') -Raw -Encoding UTF8|ConvertFrom-Json
+if([string]$installedManifest.version -ne $wantedVersion -or [string]$compatibilityManifest.version -ne $wantedVersion){throw 'LCM manifest version mismatch'}
 
 # Thin user-facing CLI shim. The implementation stays in canonical .control tools.
 $binRoot=Join-Path $sharedRoot 'bin'
@@ -216,5 +226,5 @@ if(-not($parts|Where-Object{[IO.Path]::GetFullPath($_).TrimEnd('\\').Equals([IO.
 }
 if(-not(($env:Path -split ';')|Where-Object{$_ -and [IO.Path]::GetFullPath($_).TrimEnd('\\').Equals([IO.Path]::GetFullPath($binRoot).TrimEnd('\\'),[StringComparison]::OrdinalIgnoreCase)})){$env:Path=$env:Path+';'+$binRoot}
 
-$result=[ordered]@{device_name=[string]$device[0].device_name;control_root=$controlRoot;runtime_root=$runtimeRoot;runtime_commit=$commit;marketplace=$marketName;plugin_id=$pluginId;plugin_version=$wantedVersion;plugin_enabled=$true;runtime_config=$runtimeConfig;cli_path=$lcmCmd;status='PASS'}
+$result=[ordered]@{device_name=[string]$device[0].device_name;control_root=$controlRoot;runtime_root=$runtimeRoot;runtime_commit=$commit;marketplace=$marketName;plugin_id=$pluginId;plugin_version=$wantedVersion;plugin_enabled=$true;runtime_config=$runtimeConfig;cli_path=$lcmCmd;ui_refresh_required=$true;status='PASS'}
 if($Json){$result|ConvertTo-Json -Depth 8}else{$result.GetEnumerator()|ForEach-Object{Write-Host ("{0}={1}" -f $_.Key,$_.Value)}}
