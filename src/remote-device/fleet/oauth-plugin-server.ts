@@ -180,7 +180,7 @@ body{font-family:system-ui,-apple-system,sans-serif;max-width:38rem;margin:4rem 
 </style>
 </head>
 <body>
-<h1>Local Control MCP（LCM）</h1>
+<h1>Local Control MCP</h1>
 <div class="card">
 <p class="muted">${intro}</p>
 <p>${clientLabel}：<strong>${escapeHtml(pending.clientName)}</strong></p>

@@ -4,6 +4,7 @@ import { Server as McpProtocolServer } from '@modelcontextprotocol/sdk/server/in
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { LCM_REMOTE_TOOL_CATALOG } from './lcm-remote-tool-catalog.js';
+import { localizeLcmTool, localizeLcmError } from './presentation-zh.js';
 
 export interface FleetPluginDeviceView {
     hostname: string;
@@ -160,7 +161,7 @@ function requiredString(args: Record<string, unknown>, key: string): string {
 
 function toolError(error: unknown) {
     const code = typeof (error as any)?.code === 'string' ? `${(error as any).code}: ` : '';
-    const message = error instanceof Error ? error.message : String(error);
+    const message = localizeLcmError(error);
     return { content: [{ type: 'text' as const, text: `${code}${message}` }], isError: true };
 }
 
@@ -170,12 +171,12 @@ export function createFleetPluginMcpServer(
 ): McpProtocolServer {
     const enforceScopes = options.enforceOAuthScopes === true;
     const server = new McpProtocolServer(
-        { name: 'local-control-mcp-remote', version: '0.3.1' },
-        { capabilities: { tools: {} }, instructions: 'Remote Local Control MCP. Every project tool requires exact project_id + hostname and is re-authorized by the target Agent through local .control.' },
+        { name: 'local-control-mcp-remote', version: '0.3.5' },
+        { capabilities: { tools: {} }, instructions: 'Local Control MCP 远程通道：每个项目工具必须提供准确 project_id 和 hostname，并由目标设备的 .control 重新授权。运行中的调用只轮询，禁止重复提交副作用操作；授权拒绝或能力缺口不允许自动回退 RDC。' },
     );
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: [...FLEET_CONTROL_TOOLS, ...LCM_REMOTE_TOOL_CATALOG],
+        tools: [...FLEET_CONTROL_TOOLS, ...LCM_REMOTE_TOOL_CATALOG].map(localizeLcmTool),
     }));
 
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {

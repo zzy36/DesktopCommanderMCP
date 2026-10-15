@@ -1,28 +1,24 @@
 ---
 name: local-control-mcp-default
-description: Use Local Control MCP first for authorized machine, filesystem, search and terminal work. Trigger when the user says MCP, remote MCP, local MCP, remote machine, Desktop Commander, or asks to operate an authorized computer. Fall back to Official Remote MCP only after a confirmed same-target Local runtime, startup, or transport failure; capability gaps and authorization/security denials do not trigger automatic fallback.
+description: 优先使用 Local Control MCP 执行已授权的设备、文件、搜索和终端操作。适用于 MCP、远程 MCP、本地 MCP、远程电脑和 Desktop Commander 请求；只有同项目、同设备的本地运行时、启动或传输确认故障，才可回退到官方 Remote MCP。能力缺口和授权拒绝不得自动回退。
 ---
 
-Treat these as separate control paths:
+# Local Control MCP
 
-- **Local Control MCP** is the primary/default MCP path.
-- **Official Remote MCP** is the hosted Remote Desktop Commander path kept enabled as fallback.
-- **Computer Use / GUI automation** is separate from both MCP transports.
+Local Control MCP 是默认主通道。官方 Remote MCP 是保留的托管 Remote Desktop Commander 备用通道。Computer Use / GUI 自动化是独立能力。
 
-After any eligible Official fallback, the next new user-level operation must probe LCM for the same L3/D0 first. If healthy, automatically return to LCM before substantive work. Fallback never remains sticky across operations.
+处理未指明路由的 MCP 或远程控制请求时，先通过 `.control` 确定真实 L3 `project_id` 和固定 D0 设备，再选择传输；不得发明、替换或重绑项目或设备。
 
-For an unqualified MCP/remote-control request, first resolve the exact active L3 `project_id` and its fixed D0 target from `.control`. Do not choose a transport before the project/device route is known.
+优先使用 `local_control_mcp` server，每次调用都必须带准确的 `project_id`。Local Control MCP 会通过目标设备的 `.control` 重新授权；文件和搜索路径限于授权的 `physical_root`，终端从该根目录启动。项目事实以当前 AGENTS/CURRENT/HANDOFF 和 Git 为准。
 
-Use the `local_control_mcp` server first. Every Local tool call must include the exact active L3 `project_id`. Never invent, substitute, or rebind a project or device.
+仅当已授权的同项目、同 D0 发生确认的本地运行时不可用、启动失败或传输故障时，才按 L1 策略使用官方备用通道。官方 account/link 只是在固定 D0 后选择的 R0 传输，不改变设备或项目身份。
 
-Automatic fallback to Official Remote MCP is allowed only after a confirmed failure of the Local plugin/runtime, Local startup, or Local transport for the already-authorized same target. A missing Local capability is reported as a capability gap and does not automatically fall back. Any fallback must keep the same `project_id` and same D0 hostname/device. Official account/link selection is only an R0 transport choice after D0 is fixed.
+回退不粘滞：每次新的用户级操作先轻量探测同 L3/D0 的 Local；恢复后立即返回 Local，再执行实际操作。不自动重放已提交、结果不明确的副作用操作。
 
-Do **not** fall back on policy/security/identity errors such as `PROJECT_DEVICE_DENIED`, `POLICY_SKEW`, `IDENTITY_MISMATCH`, `TARGET_AMBIGUOUS`, path-scope denial, or an approval denial. Those are hard boundaries and must be surfaced instead of bypassed.
+能力缺口必须明确报告，不得自动回退。`PROJECT_DEVICE_DENIED`、`POLICY_SKEW`、`IDENTITY_MISMATCH`、`TARGET_AMBIGUOUS`、路径拒绝、批准拒绝等安全边界也不允许回退或绕过。
 
-Local Control MCP re-authorizes every call through the machine's `.control` policy. Filesystem/search paths are restricted to the authorized `physical_root`; terminal sessions start in that root. Follow the active project's AGENTS/CURRENT/HANDOFF and Git state for project facts.
+文件、搜索、终端和项目进程操作优先通过 Local Control MCP。只有任务明确需要浏览器、鼠标或键盘时才使用 Computer Use；不得把 GUI 作为授权拒绝的绕过路径。
 
-Prefer Local Control MCP for file inspection/editing, searches, terminal commands and project-scoped process sessions. Use Computer Use only when the task specifically requires GUI/browser/mouse/keyboard interaction.
+网页、手机和 iPad 优先使用已有的自托管 Secure MCP Tunnel。仅在其确认发生同项目、同 D0 的运行时、启动或传输故障时，按相同规则使用官方备用通道。
 
-On web/mobile/iPad, prefer the self-hosted Secure MCP Tunnel path when available. If that Local path has a confirmed runtime, startup, or transport failure, the same fallback rule applies: Official Remote MCP may be used automatically only for the same fixed D0/project. Capability gaps and Local authorization/security denials do not trigger automatic fallback.
-
-For remote work that depends on the logged-in user's Git credentials, browser/GUI or profile, use `execution_context: interactive`. LCM re-authorizes it on the exact D0 and requires a live user bridge. A missing interactive session never authorizes SYSTEM or RDC fallback. Follow-up process/search operations inherit the original execution context; do not change it. Background work can use `system`.
+远程操作需要已登录用户的 Git 凭据、浏览器/GUI 或用户环境时，使用 `execution_context: interactive`，并要求准确 D0 上有授权的用户桥接。用户会话缺失不允许改用 SYSTEM 或 RDC。进程/搜索后续调用继承原执行上下文，不得更换；后台任务可用 `system`。

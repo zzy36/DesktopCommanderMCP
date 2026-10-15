@@ -31,7 +31,7 @@ const controlRoot = process.env.MACHINE_CONTROL_ROOT
   ?? (typeof runtimeConfig?.controlRoot === 'string' ? runtimeConfig.controlRoot : null)
   ?? (typeof agentConfig?.controlRoot === 'string' ? agentConfig.controlRoot : null);
 if (!controlRoot) {
-  console.error(`Local Control MCP launcher cannot resolve controlRoot from env, ${runtimeConfigPath}, or ${agentConfigPath}`);
+  console.error(`Local Control MCP 无法定位 controlRoot，请核对环境变量、 ${runtimeConfigPath} 或 ${agentConfigPath}`);
   process.exit(1);
 }
 
@@ -52,7 +52,7 @@ for (const candidate of runtimeCandidates) {
   try { await fs.access(file); target = file; break; } catch { /* try next */ }
 }
 if (!target) {
-  console.error(`Local Control MCP launcher cannot find a built runtime. Checked: ${runtimeCandidates.join('; ')}`);
+  console.error(`Local Control MCP 未找到构建后的运行时，已检查： ${runtimeCandidates.join('; ')}`);
   process.exit(1);
 }
 

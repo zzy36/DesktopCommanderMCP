@@ -6,10 +6,10 @@
   "mcpServers": "./.mcp.json",
   "requires_local_executor": true,
   "interface": {
-    "displayName": "Local Control MCP（LCM）",
+    "displayName": "Local Control MCP",
     "shortDescription": "自托管、项目隔离的本地与远程设备控制",
     "longDescription": "LCM 是本地优先的 MCP 控制通道。每次工具调用都通过本机 .control 重新授权；官方 Remote MCP 仅作为同项目、同 D0 且本地运行时/启动/传输确认故障后的备用通道。",
-    "developerName": "LCM",
+    "developerName": "Local Control MCP",
     "category": "Developer Tools",
     "brandColor": "#2563EB",
     "composerIcon": "./assets/local-control-mcp.svg",

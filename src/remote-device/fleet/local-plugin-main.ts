@@ -7,6 +7,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { DesktopCommanderIntegration } from '../desktop-commander-integration.js';
 import { ControlPolicyAuthorizer } from './control-policy.js';
 import { LCM_PROJECT_TOOLS, ProjectResourceScope, scopeProjectToolArgs, validateProjectToolPaths } from './project-tool-contract.js';
+import { localizeLcmTool, localizeLcmError } from './presentation-zh.js';
 
 const stderr = (...args: unknown[]) => process.stderr.write(`${args.map(formatLogValue).join(' ')}\n`);
 console.log = stderr;
@@ -50,14 +51,14 @@ function addProjectIdSchema(tool: any): any {
     : required;
   return {
     ...tool,
-    description: `Local Control MCP on ${localHostname}. Requires exact active L3 project_id and re-authorizes it through local .control. ${tool.description ?? ''}`.trim(),
+    description: `Local Control MCP：在 ${localHostname} 执行；每次调用通过本机 .control 重新核对 project_id。${tool.description ?? ''}`.trim(),
     inputSchema: {
       ...original,
       type: 'object',
       properties: {
         project_id: {
           type: 'string', minLength: 1,
-          description: 'Exact active L3 project_id. Never substitute another project when authorization fails.',
+          description: '当前真实 L3 project_id；授权失败时不得替换项目。',
         },
         ...properties,
       },
@@ -74,25 +75,25 @@ async function main(): Promise<void> {
   await authorizer.warmup();
   await desktop.initialize();
   const listed = await desktop.listClientTools();
-  const exposed = listed.tools.filter((tool: any) => LCM_PROJECT_TOOLS.has(tool.name)).map(addProjectIdSchema);
+  const exposed = listed.tools.filter((tool: any) => LCM_PROJECT_TOOLS.has(tool.name)).map(localizeLcmTool).map(addProjectIdSchema);
   const byName = new Map(exposed.map((tool: any) => [tool.name, tool]));
 
   const server = new Server(
     { name: 'local-control-mcp', version: '0.3.5' },
-    { capabilities: { tools: {} }, instructions: 'Primary self-hosted project control path. Every call requires exact L3 project_id and is re-authorized by local .control. Hosted Remote Desktop Commander is not used by this server.' },
+    { capabilities: { tools: {} }, instructions: 'Local Control MCP 是自托管项目控制主通道。每次调用必须提供真实 L3 project_id，并由本机 .control 重新授权。此服务不调用托管 RDC。' },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: exposed }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const toolName = request.params.name;
     if (!byName.has(toolName)) {
-      return { content: [{ type: 'text', text: `Tool ${toolName} is not exposed by Local Control MCP` }], isError: true };
+      return { content: [{ type: 'text', text: `Local Control MCP 未开放工具 ${toolName}` }], isError: true };
     }
     const rawArgs = request.params.arguments && typeof request.params.arguments === 'object'
       ? request.params.arguments as Record<string, unknown> : {};
     const projectId = typeof rawArgs.project_id === 'string' ? rawArgs.project_id.trim() : '';
     if (!projectId) {
-      return { content: [{ type: 'text', text: 'PROJECT_DEVICE_DENIED: exact project_id is required' }], isError: true };
+      return { content: [{ type: 'text', text: 'PROJECT_DEVICE_DENIED: 必须提供真实 project_id' }], isError: true };
     }
     try {
       const auth = await authorizer.authorize(projectId, localHostname);
@@ -108,7 +109,7 @@ async function main(): Promise<void> {
       return resources.transform(toolName, projectId, auth, result, localHostname) as any;
     } catch (error) {
       const code = typeof (error as any)?.code === 'string' ? `${(error as any).code}: ` : '';
-      const message = error instanceof Error ? error.message : String(error);
+      const message = localizeLcmError(error);
       return { content: [{ type: 'text', text: `${code}${message}` }], isError: true };
     }
   });
