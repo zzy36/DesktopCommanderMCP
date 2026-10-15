@@ -40,7 +40,7 @@ export async function startInteractiveUserBridge(options: InteractiveUserBridgeO
     const hostname = canonicalHostname(os.hostname());
     let sessionId = 1;
     if (process.platform === 'win32') {
-        const result = await promisify(execFile)('powershell.exe', ['-NoProfile', '-Command', `(Get-Process -Id ${process.pid}).SessionId`], { windowsHide: true });
+        const result = await promisify(execFile)('pwsh.exe', ['-NoProfile', '-Command', `(Get-Process -Id ${process.pid}).SessionId`], { windowsHide: true });
         sessionId = Number(result.stdout.trim());
         if (!Number.isInteger(sessionId) || sessionId <= 0 || os.userInfo().username.toLowerCase() === 'system') throw error('bridge requires a logged-in interactive user');
         if (options.testSocket) throw error('Windows bridge only permits a local named pipe');
