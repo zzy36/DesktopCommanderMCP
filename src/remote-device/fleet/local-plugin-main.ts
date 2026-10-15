@@ -45,6 +45,9 @@ function addProjectIdSchema(tool: any): any {
     ? original.properties : {};
   const required = Array.isArray(original.required)
     ? original.required.filter((v: unknown) => typeof v === 'string') : [];
+  const normalizedRequired = tool.name === 'start_process'
+    ? required.filter((name: string) => name !== 'timeout_ms')
+    : required;
   return {
     ...tool,
     description: `Local Control MCP on ${localHostname}. Requires exact active L3 project_id and re-authorizes it through local .control. ${tool.description ?? ''}`.trim(),
@@ -58,7 +61,7 @@ function addProjectIdSchema(tool: any): any {
         },
         ...properties,
       },
-      required: ['project_id', ...required.filter((name: string) => name !== 'project_id')],
+      required: ['project_id', ...normalizedRequired.filter((name: string) => name !== 'project_id')],
     },
   };
 }

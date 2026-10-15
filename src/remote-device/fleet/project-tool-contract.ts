@@ -104,6 +104,7 @@ export function scopeProjectToolArgs(
     const quote = (value: string) => `'${value.replace(/'/g, "''")}'`;
     args.command = `$env:FLEET_PROJECT_ID=${quote(auth.projectId)}; $env:FLEET_PROJECT_ROOT=${quote(root)}; Set-Location -LiteralPath ${quote(root)}; ${command}`;
     args.shell = requestedShell || 'pwsh';
+    if (args.timeout_ms === undefined) args.timeout_ms = 3000;
   }
   return args;
 }
