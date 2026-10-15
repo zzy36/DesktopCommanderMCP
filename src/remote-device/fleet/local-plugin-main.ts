@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   const byName = new Map(exposed.map((tool: any) => [tool.name, tool]));
 
   const server = new Server(
-    { name: 'local-control-mcp', version: '0.3.0' },
+    { name: 'local-control-mcp', version: '0.3.1' },
     { capabilities: { tools: {} }, instructions: 'Primary self-hosted project control path. Every call requires exact L3 project_id and is re-authorized by local .control. Hosted Remote Desktop Commander is not used by this server.' },
   );
 

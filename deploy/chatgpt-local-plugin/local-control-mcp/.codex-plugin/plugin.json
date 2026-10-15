@@ -1,6 +1,6 @@
 {
   "name": "local-control-mcp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Primary Local Control MCP with L1-governed same-target Official fallback only after confirmed Local runtime/startup/transport failure.",
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",

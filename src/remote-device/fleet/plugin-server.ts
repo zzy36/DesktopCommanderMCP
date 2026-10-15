@@ -170,7 +170,7 @@ export function createFleetPluginMcpServer(
 ): McpProtocolServer {
     const enforceScopes = options.enforceOAuthScopes === true;
     const server = new McpProtocolServer(
-        { name: 'local-control-mcp-remote', version: '0.3.0' },
+        { name: 'local-control-mcp-remote', version: '0.3.1' },
         { capabilities: { tools: {} }, instructions: 'Remote Local Control MCP. Every project tool requires exact project_id + hostname and is re-authorized by the target Agent through local .control.' },
     );
 
