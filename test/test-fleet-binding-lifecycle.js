@@ -1,0 +1,57 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
+import { SingleUserOAuthProvider } from '../dist/remote-device/fleet/single-user-oauth.js';
+import { FleetEnrollmentStore } from '../dist/remote-device/fleet/enrollment-store.js';
+const temp = await mkdtemp(path.join(os.tmpdir(), 'lcm-binding-'));
+const statePath = path.join(temp, 'oauth-state.json');
+const options = { statePath, issuerUrl: new URL('https://edge.example'), resourceUrl: new URL('https://edge.example/mcp') };
+const client = { client_id: 'gpt', client_name: 'GPT', redirect_uris: ['https://chatgpt.com/connector_platform/oauth/callback'], token_endpoint_auth_method: 'none' };
+const hash = v => createHash('sha256').update(v).digest('hex');
+const legacyToken = randomBytes(32).toString('base64url');
+const legacyRecord = { clientId: client.client_id, scopes: ['fleet:read', 'offline_access'], resource: options.resourceUrl.href, expiresAt: Math.floor(Date.now()/1000)+3600, subject: 'owner' };
+const pending = async provider => {
+  let target;
+  await provider.authorize(client, { redirectUri: client.redirect_uris[0], codeChallenge: 'challenge', scopes: ['fleet:read'], resource: options.resourceUrl }, { redirect: (_status, url) => target = new URL(url) });
+  return provider.getPendingAuthorization(target.searchParams.get('request_id'));
+};
+try {
+  await writeFile(statePath, JSON.stringify({ schemaVersion: 1, clients: { gpt: client }, accessTokens: { [hash(legacyToken)]: legacyRecord }, refreshTokens: {} }));
+  let provider = new SingleUserOAuthProvider(options);
+  assert.equal((await provider.verifyAccessToken(legacyToken)).clientId, 'gpt');
+  const initial = await provider.bindingStatus();
+  const saved = JSON.parse(await readFile(statePath, 'utf8'));
+  assert.equal(saved.schemaVersion, 2); assert(initial.owner.id); assert(initial.activeBinding.id);
+  provider = new SingleUserOAuthProvider(options);
+  assert.deepEqual(await provider.bindingStatus(), initial, 'migration preserves durable Owner and grant across restart');
+  const request = await pending(provider);
+  await assert.rejects(provider.completeLocalApproval(request.requestId, request.userCode), /binding changed/);
+  assert.deepEqual(await provider.bindingStatus(), initial, 'implicit replacement fails closed');
+  const replacement = await pending(provider);
+  const callback = await provider.completeLocalApproval(replacement.requestId, replacement.userCode, initial.activeBinding.id);
+  await assert.rejects(provider.verifyAccessToken(legacyToken), /invalid or expired/);
+  const tokens = await provider.exchangeAuthorizationCode(client, callback.searchParams.get('code'), '', client.redirect_uris[0], options.resourceUrl);
+  const concurrent = await Promise.allSettled([1, 2].map(() => provider.exchangeRefreshToken(client, tokens.refresh_token, undefined, options.resourceUrl)));
+  assert.equal(concurrent.filter(r => r.status === 'fulfilled').length, 1, 'refresh rotation is single-use under concurrency');
+  const refreshed = concurrent.find(r => r.status === 'fulfilled').value;
+  const active = await provider.bindingStatus();
+  assert.equal(active.owner.id, initial.owner.id); assert.notEqual(active.activeBinding.id, initial.activeBinding.id);
+  await assert.rejects(provider.revokeBinding(initial.activeBinding.id), /binding changed/);
+  await provider.revokeBinding(active.activeBinding.id);
+  await assert.rejects(provider.verifyAccessToken(refreshed.access_token), /invalid or expired/);
+  await assert.rejects(provider.exchangeRefreshToken(client, refreshed.refresh_token, undefined, options.resourceUrl), /invalid or expired/);
+  assert.equal((await new SingleUserOAuthProvider(options).bindingStatus()).activeBinding, null);
+  const enrollmentPath = path.join(temp, 'enrollment.json');
+  let enrollment = new FleetEnrollmentStore(enrollmentPath); await enrollment.initialize();
+  await enrollment.revokeDevice('YUAN');
+  enrollment = new FleetEnrollmentStore(enrollmentPath); await enrollment.initialize();
+  assert.deepEqual(enrollment.listRevokedDevices(), ['YUAN'], 'revocation survives restart even for configured identities');
+  // Ambiguous legacy grants never silently select or invalidate one account.
+  saved.schemaVersion = 1;
+  saved.accessTokens[hash('other')] = { ...legacyRecord, clientId: 'other' };
+  await writeFile(statePath, JSON.stringify(saved));
+  await assert.rejects(new SingleUserOAuthProvider(options).bindingStatus(), /ambiguous legacy/);
+  console.log('LCM owner migration, explicit binding replacement, refresh race, revoke persistence PASS');
+} finally { await rm(temp, { recursive: true, force: true }); }

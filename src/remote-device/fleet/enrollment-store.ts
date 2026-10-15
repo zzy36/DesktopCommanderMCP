@@ -39,6 +39,7 @@ type StoredDeviceAuthorization = FleetDeviceAuthorizationRecord & {
 };
 type EnrollmentState = {
     schemaVersion: 2;
+    revokedDevices?: string[];
     pairings: StoredPairing[];
     approvedDevices: StoredApprovedDevice[];
     deviceAuthorizations: StoredDeviceAuthorization[];
@@ -48,6 +49,7 @@ export class FleetEnrollmentStore {
     private readonly filePath: string;
     private state: EnrollmentState = { schemaVersion: 2, pairings: [], approvedDevices: [], deviceAuthorizations: [] };
     private loaded = false;
+    private mutationQueue: Promise<unknown> = Promise.resolve();
 
     constructor(filePath: string) {
         if (!filePath) throw new Error('enrollment store path is required');
@@ -63,6 +65,7 @@ export class FleetEnrollmentStore {
             }
             this.state = {
                 schemaVersion: 2,
+                revokedDevices: Array.isArray(raw.revokedDevices) ? raw.revokedDevices as string[] : [],
                 pairings: raw.pairings as StoredPairing[],
                 approvedDevices: raw.approvedDevices as StoredApprovedDevice[],
                 deviceAuthorizations: Array.isArray(raw.deviceAuthorizations)
@@ -81,77 +84,85 @@ export class FleetEnrollmentStore {
     }
 
     async createPairing(hostnameInput: string, ttlMs = 10 * 60_000): Promise<FleetPairingRecord & { code: string }> {
-        this.assertLoaded();
-        const hostname = canonicalHostname(hostnameInput);
-        if (!hostname) throw new Error('hostname is required');
-        const now = Date.now();
-        const code = randomBytes(18).toString('base64url');
-        const record: StoredPairing = {
-            id: randomUUID(), hostname, status: 'issued', createdAtMs: now,
-            expiresAtMs: now + clampTtl(ttlMs), fingerprint: null, policyRevision: null,
-            claimedAtMs: null, approvedAtMs: null, codeHash: hashCode(code),
-        };
-        this.state.pairings.push(record);
-        this.state.pairings = this.state.pairings.slice(-100);
-        await this.persist();
-        return { ...this.publicPairing(record), code };
+        return this.transaction(async () => {
+            this.assertLoaded();
+            const hostname = canonicalHostname(hostnameInput);
+            if (!hostname) throw new Error('hostname is required');
+            const now = Date.now();
+            const code = randomBytes(18).toString('base64url');
+            const record: StoredPairing = {
+                id: randomUUID(), hostname, status: 'issued', createdAtMs: now,
+                expiresAtMs: now + clampTtl(ttlMs), fingerprint: null, policyRevision: null,
+                claimedAtMs: null, approvedAtMs: null, codeHash: hashCode(code),
+            };
+            this.state.pairings.push(record);
+            this.state.pairings = this.state.pairings.slice(-100);
+            await this.persist();
+            return { ...this.publicPairing(record), code };
+        });
     }
 
     async claimPairing(input: { code: string; hostname: string; fingerprint: string; policyRevision: string }): Promise<FleetPairingRecord> {
-        this.assertLoaded();
-        await this.expireOldRecords();
-        const hostname = canonicalHostname(input.hostname);
-        assertPolicyRevision(input.policyRevision);
-        const codeHash = hashCode(input.code);
-        const record = this.state.pairings.find((item) => item.codeHash === codeHash);
-        if (!record || record.hostname !== hostname || record.status !== 'issued' || record.expiresAtMs <= Date.now()) {
-            throw new Error('pairing code is invalid or expired');
-        }
-        const fingerprint = normalizeFingerprint(input.fingerprint);
-        record.status = 'claimed'; record.fingerprint = fingerprint; record.policyRevision = input.policyRevision;
-        record.claimedAtMs = Date.now();
-        await this.persist();
-        return this.publicPairing(record);
+        return this.transaction(async () => {
+            this.assertLoaded();
+            await this.expireOldRecords();
+            const hostname = canonicalHostname(input.hostname);
+            assertPolicyRevision(input.policyRevision);
+            const codeHash = hashCode(input.code);
+            const record = this.state.pairings.find((item) => item.codeHash === codeHash);
+            if (!record || record.hostname !== hostname || record.status !== 'issued' || record.expiresAtMs <= Date.now()) {
+                throw new Error('pairing code is invalid or expired');
+            }
+            const fingerprint = normalizeFingerprint(input.fingerprint);
+            record.status = 'claimed'; record.fingerprint = fingerprint; record.policyRevision = input.policyRevision;
+            record.claimedAtMs = Date.now();
+            await this.persist();
+            return this.publicPairing(record);
+        });
     }
 
     async approvePairing(id: string): Promise<DeviceBinding> {
-        this.assertLoaded();
-        await this.expireOldRecords();
-        const record = this.state.pairings.find((item) => item.id === id);
-        if (!record || record.status !== 'claimed' || !record.fingerprint) throw new Error('pairing is not ready for approval');
-        const device = this.approveDeviceIdentity(record.hostname, record.fingerprint);
-        record.status = 'approved'; record.approvedAtMs = Date.now();
-        await this.persist();
-        return device;
+        return this.transaction(async () => {
+            this.assertLoaded();
+            await this.expireOldRecords();
+            const record = this.state.pairings.find((item) => item.id === id);
+            if (!record || record.status !== 'claimed' || !record.fingerprint) throw new Error('pairing is not ready for approval');
+            const device = this.approveDeviceIdentity(record.hostname, record.fingerprint);
+            record.status = 'approved'; record.approvedAtMs = Date.now();
+            await this.persist();
+            return device;
+        });
     }
 
     async createDeviceAuthorization(input: {
-        hostname: string;
-        fingerprint: string;
-        policyRevision: string;
-        codeChallenge: string;
-        ttlMs?: number;
+            hostname: string;
+            fingerprint: string;
+            policyRevision: string;
+            codeChallenge: string;
+            ttlMs?: number;
     }): Promise<FleetDeviceAuthorizationRecord & { deviceCode: string; userCode: string }> {
-        this.assertLoaded();
-        await this.expireOldRecords();
-        const hostname = canonicalHostname(input.hostname);
-        if (!hostname) throw new Error('hostname is required');
-        const fingerprint = normalizeFingerprint(input.fingerprint);
-        assertPolicyRevision(input.policyRevision);
-        const codeChallenge = String(input.codeChallenge ?? '');
-        if (!/^[A-Za-z0-9_-]{43,128}$/.test(codeChallenge)) throw new Error('invalid PKCE code challenge');
-        const now = Date.now();
-        const deviceCode = randomBytes(32).toString('base64url');
-        const userCode = generateUserCode();
-        const record: StoredDeviceAuthorization = {
-            id: randomUUID(), hostname, status: 'pending', createdAtMs: now,
-            expiresAtMs: now + clampTtl(input.ttlMs ?? 10 * 60_000), fingerprint, policyRevision: input.policyRevision,
-            approvedAtMs: null, deviceCodeHash: hashCode(deviceCode), userCodeHash: hashCode(normalizeUserCode(userCode)), codeChallenge,
-        };
-        this.state.deviceAuthorizations.push(record);
-        this.state.deviceAuthorizations = this.state.deviceAuthorizations.slice(-100);
-        await this.persist();
-        return { ...this.publicDeviceAuthorization(record), deviceCode, userCode };
+        return this.transaction(async () => {
+            this.assertLoaded();
+            await this.expireOldRecords();
+            const hostname = canonicalHostname(input.hostname);
+            if (!hostname) throw new Error('hostname is required');
+            const fingerprint = normalizeFingerprint(input.fingerprint);
+            assertPolicyRevision(input.policyRevision);
+            const codeChallenge = String(input.codeChallenge ?? '');
+            if (!/^[A-Za-z0-9_-]{43,128}$/.test(codeChallenge)) throw new Error('invalid PKCE code challenge');
+            const now = Date.now();
+            const deviceCode = randomBytes(32).toString('base64url');
+            const userCode = generateUserCode();
+            const record: StoredDeviceAuthorization = {
+                id: randomUUID(), hostname, status: 'pending', createdAtMs: now,
+                expiresAtMs: now + clampTtl(input.ttlMs ?? 10 * 60_000), fingerprint, policyRevision: input.policyRevision,
+                approvedAtMs: null, deviceCodeHash: hashCode(deviceCode), userCodeHash: hashCode(normalizeUserCode(userCode)), codeChallenge,
+            };
+            this.state.deviceAuthorizations.push(record);
+            this.state.deviceAuthorizations = this.state.deviceAuthorizations.slice(-100);
+            await this.persist();
+            return { ...this.publicDeviceAuthorization(record), deviceCode, userCode };
+        });
     }
 
     getDeviceAuthorizationByUserCode(userCode: string): FleetDeviceAuthorizationRecord | null {
@@ -164,31 +175,35 @@ export class FleetEnrollmentStore {
     }
 
     async approveDeviceAuthorizationByUserCode(userCode: string): Promise<{ authorization: FleetDeviceAuthorizationRecord; device: DeviceBinding }> {
-        this.assertLoaded();
-        await this.expireOldRecords();
-        const hash = hashCode(normalizeUserCode(userCode));
-        const record = this.state.deviceAuthorizations.find((item) => item.userCodeHash === hash);
-        if (!record || record.status !== 'pending' || record.expiresAtMs <= Date.now()) throw new Error('device authorization code is invalid or expired');
-        const device = this.approveDeviceIdentity(record.hostname, record.fingerprint);
-        record.status = 'approved'; record.approvedAtMs = Date.now();
-        await this.persist();
-        return { authorization: this.publicDeviceAuthorization(record), device };
+        return this.transaction(async () => {
+            this.assertLoaded();
+            await this.expireOldRecords();
+            const hash = hashCode(normalizeUserCode(userCode));
+            const record = this.state.deviceAuthorizations.find((item) => item.userCodeHash === hash);
+            if (!record || record.status !== 'pending' || record.expiresAtMs <= Date.now()) throw new Error('device authorization code is invalid or expired');
+            const device = this.approveDeviceIdentity(record.hostname, record.fingerprint);
+            record.status = 'approved'; record.approvedAtMs = Date.now();
+            await this.persist();
+            return { authorization: this.publicDeviceAuthorization(record), device };
+        });
     }
 
     async pollDeviceAuthorization(input: { deviceCode: string; codeVerifier: string }): Promise<FleetDeviceAuthorizationRecord> {
-        this.assertLoaded();
-        await this.expireOldRecords();
-        const record = this.state.deviceAuthorizations.find((item) => item.deviceCodeHash === hashCode(input.deviceCode));
-        if (!record) throw new Error('invalid device code');
-        const verifier = String(input.codeVerifier ?? '');
-        if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) throw new Error('invalid PKCE code verifier');
-        const actualChallenge = createHash('sha256').update(verifier, 'utf8').digest('base64url');
-        if (!timingSafeTextEqual(actualChallenge, record.codeChallenge)) throw new Error('PKCE verification failed');
-        if (record.expiresAtMs <= Date.now() || record.status === 'expired') {
-            record.status = 'expired';
-            await this.persist();
-        }
-        return this.publicDeviceAuthorization(record);
+        return this.transaction(async () => {
+            this.assertLoaded();
+            await this.expireOldRecords();
+            const record = this.state.deviceAuthorizations.find((item) => item.deviceCodeHash === hashCode(input.deviceCode));
+            if (!record) throw new Error('invalid device code');
+            const verifier = String(input.codeVerifier ?? '');
+            if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) throw new Error('invalid PKCE code verifier');
+            const actualChallenge = createHash('sha256').update(verifier, 'utf8').digest('base64url');
+            if (!timingSafeTextEqual(actualChallenge, record.codeChallenge)) throw new Error('PKCE verification failed');
+            if (record.expiresAtMs <= Date.now() || record.status === 'expired') {
+                record.status = 'expired';
+                await this.persist();
+            }
+            return this.publicDeviceAuthorization(record);
+        });
     }
 
     listPairings(): FleetPairingRecord[] {
@@ -212,9 +227,25 @@ export class FleetEnrollmentStore {
         return this.state.approvedDevices.map(({ approvedAtMs: _approvedAtMs, ...device }) => ({ ...device }));
     }
 
+    listRevokedDevices(): string[] { this.assertLoaded(); return [...(this.state.revokedDevices ?? [])]; }
+
+    async revokeDevice(hostnameInput: string): Promise<void> {
+        return this.transaction(async () => {
+            this.assertLoaded(); const hostname = canonicalHostname(hostnameInput);
+            if (!hostname) throw new Error('hostname required');
+            const previous = structuredClone(this.state);
+            this.state.revokedDevices = [...new Set([...(this.state.revokedDevices ?? []), hostname])];
+            this.state.approvedDevices = this.state.approvedDevices.filter(d => d.hostname !== hostname);
+            this.state.pairings = this.state.pairings.filter(d => d.hostname !== hostname);
+            this.state.deviceAuthorizations = this.state.deviceAuthorizations.filter(d => d.hostname !== hostname);
+            try { await this.persist(); } catch (error) { this.state = previous; throw error; }
+        });
+    }
+
     private approveDeviceIdentity(hostname: string, fingerprint: string): DeviceBinding {
         const existing = this.state.approvedDevices.find((item) => item.hostname === hostname);
         if (existing && existing.publicKeyFingerprint !== fingerprint) throw new Error(`device ${hostname} is already approved with a different identity`);
+        this.state.revokedDevices = this.state.revokedDevices?.filter(h => h !== hostname);
         if (!existing) this.state.approvedDevices.push({ hostname, publicKeyFingerprint: fingerprint, approvedAtMs: Date.now() });
         return { hostname, publicKeyFingerprint: fingerprint };
     }
@@ -239,6 +270,16 @@ export class FleetEnrollmentStore {
     private publicDeviceAuthorization(record: StoredDeviceAuthorization): FleetDeviceAuthorizationRecord {
         const { deviceCodeHash: _deviceCodeHash, userCodeHash: _userCodeHash, codeChallenge: _codeChallenge, ...safe } = record;
         return { ...safe };
+    }
+
+    private transaction<T>(work: () => Promise<T>): Promise<T> {
+        const execute = async () => {
+            const previous = structuredClone(this.state);
+            try { return await work(); } catch (error) { this.state = previous; throw error; }
+        };
+        const next = this.mutationQueue.then(execute, execute);
+        this.mutationQueue = next.then(() => undefined, () => undefined);
+        return next;
     }
 
     private async persist(): Promise<void> {

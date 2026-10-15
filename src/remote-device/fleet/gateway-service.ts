@@ -1,3 +1,4 @@
+import { LocalAdminSecurity } from './local-admin-security.js';
 import { mkdir } from 'node:fs/promises';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -49,15 +50,26 @@ export async function startFleetGatewayService(
         callTimeoutMs: config.callTimeoutMs,
     });
 
+    for (const hostname of enrollmentStore.listRevokedDevices()) gateway.revokeDeviceBinding(hostname);
     const mcpRuntime = createMcpServer(config, backend, env);
+    if (mcpRuntime.oauthProvider) await mcpRuntime.oauthProvider.bindingStatus();
+    const adminOrigin = config.adminOrigin ?? (config.mcpAuth.type === 'oauth' ? config.mcpAuth.approvalUrl.origin : undefined);
+    if (config.adminListenPort !== undefined && !adminOrigin) throw new Error('admin.origin is required');
+    const security = adminOrigin ? await LocalAdminSecurity.load(adminOrigin, path.join(config.stateDir, 'admin-key')) : undefined;
     const mcpServer = mcpRuntime.server;
     const agentServer = createAgentHttpServer(config);
     const adminServer = config.adminListenPort !== undefined && config.adminListenHost && config.adminBasePath
         ? createFleetAdminHttpServer(gateway, {
+            security: security!,
+            release: env.LCM_RELEASE ?? 'development',
             basePath: config.adminBasePath,
             projects: config.projects,
             enrollmentStore,
             onApproveDevice: (device) => { gateway.addDeviceBinding(device); },
+            onRevokeDevice: async (hostname) => {
+                await enrollmentStore.revokeDevice(hostname);
+                gateway.revokeDeviceBinding(hostname);
+            },
             oauthProvider: mcpRuntime.oauthProvider,
         })
         : null;

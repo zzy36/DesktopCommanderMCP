@@ -57,6 +57,7 @@ const GatewayOAuthAuthSchema = z.object({
 }).strict();
 
 const GatewayAdminSchema = z.object({
+    origin: z.string().url().optional(),
     listenHost: z.string().min(1).default('127.0.0.1'),
     listenPort: ListenPort,
     basePath: z.string().min(1).default('/admin'),
@@ -110,6 +111,7 @@ export interface ResolvedGatewayServiceConfig {
     adminListenHost?: string;
     adminListenPort?: number;
     adminBasePath?: string;
+    adminOrigin?: string;
     stateDir: string;
     devices: Array<{ hostname: string; publicKeyFingerprint: string }>;
     projects: Array<{ projectId: string; hostname: string; policyRevision: string }>;
@@ -246,6 +248,7 @@ export async function loadGatewayServiceConfig(
         adminListenHost: raw.admin?.listenHost,
         adminListenPort: raw.admin?.listenPort,
         adminBasePath: raw.admin?.basePath,
+        adminOrigin: raw.admin?.origin,
         stateDir: path.resolve(raw.stateDir),
         devices,
         projects,

@@ -1,3 +1,6 @@
+import { LocalAdminSecurity } from '../dist/remote-device/fleet/local-admin-security.js';
+import { adminSession } from './fleet-admin-session.js';
+import { Script } from 'node:vm';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -14,7 +17,10 @@ const gateway = new FleetGateway({ devices, projects, heartbeatSweepMs: 60_000 }
 const enrollmentStore = new FleetEnrollmentStore(path.join(temp, 'enrollment.json'));
 await enrollmentStore.initialize();
 let approvedDevice = null;
+const secret = randomBytes(32).toString('base64url');
+const security = new LocalAdminSecurity('http://127.0.0.1', secret);
 const server = createFleetAdminHttpServer(gateway, {
+  security,
   basePath: '/admin',
   devices,
   projects,
@@ -32,11 +38,20 @@ try {
   const origin = `http://127.0.0.1:${address.port}`;
   const base = `${origin}/admin`;
 
+  // Test fixture uses a kernel-assigned port. Production origin is immutable config.
+  security.origin = origin;
+  assert.equal((await globalThis.fetch(base + '/api/status')).status, 401);
+  const session = await adminSession(origin, secret);
+  const rawFetch = globalThis.fetch;
+  const fetch = (url, opts = {}) => rawFetch(url, { ...opts, headers: { ...session.headers, ...opts.headers } });
+  assert.equal((await rawFetch(origin + '/pair/approve', { method: 'POST', headers: { cookie: session.cookie, origin }, body: '{}' })).status, 403);
+  assert.equal((await fetch(origin + '/pair/approve', { method: 'POST', headers: { origin: 'https://evil.example' }, body: '{}' })).status, 403);
   let response = await fetch(base);
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Local Control MCP/);
   assert.match(html, /新设备引导/);
+  for (const block of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Script(block[1]);
 
   response = await fetch(`${base}/api/status`);
   assert.equal(response.status, 200);

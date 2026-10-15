@@ -41,6 +41,11 @@ export class FleetRouter {
         return normalized;
     }
 
+    revokeDeviceBinding(hostnameInput: string): void {
+        const hostname = canonicalHostname(hostnameInput);
+        this.devices.delete(hostname); this.sessions.delete(hostname);
+    }
+
     registerAgent(input: AgentDescriptor): AgentDescriptor {
         const hostname = canonicalHostname(input.hostname);
         const expected = this.devices.get(hostname);

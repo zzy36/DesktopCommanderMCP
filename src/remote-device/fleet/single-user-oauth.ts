@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Response } from 'express';
@@ -26,7 +26,12 @@ const AUTHORIZATION_CODE_TTL_MS = 5 * 60 * 1000;
 
 export const FLEET_OAUTH_SCOPES = ['fleet:read', 'fleet:write', 'offline_access'] as const;
 
+export interface GPTBinding {
+    id: string; clientId: string; createdAt: string; scopes: string[]; resource: string;
+}
+
 interface PersistedTokenRecord {
+    bindingId: string;
     clientId: string;
     scopes: string[];
     resource: string;
@@ -35,7 +40,9 @@ interface PersistedTokenRecord {
 }
 
 interface PersistedOAuthState {
-    schemaVersion: 1;
+    schemaVersion: 2;
+    owner: { id: string; createdAt: string };
+    activeBinding: GPTBinding | null;
     updatedAt: string;
     clients: Record<string, OAuthClientInformationFull>;
     accessTokens: Record<string, PersistedTokenRecord>;
@@ -52,6 +59,7 @@ interface PendingAuthorization {
 }
 
 interface AuthorizationCodeRecord {
+    bindingId: string;
     clientId: string;
     params: AuthorizationParams;
     scopes: string[];
@@ -110,14 +118,37 @@ class PersistentOAuthRepository {
     }
 
     async getAccessToken(tokenHash: string): Promise<PersistedTokenRecord | undefined> {
-        return this.read((state) => state.accessTokens[tokenHash]);
+        return this.read((state) => { const token = state.accessTokens[tokenHash]; return token?.bindingId === state.activeBinding?.id ? token : undefined; });
     }
 
     async getRefreshToken(tokenHash: string): Promise<PersistedTokenRecord | undefined> {
-        return this.read((state) => state.refreshTokens[tokenHash]);
+        return this.read((state) => { const token = state.refreshTokens[tokenHash]; return token?.bindingId === state.activeBinding?.id ? token : undefined; });
+    }
+
+    async status() {
+        return this.read((state) => structuredClone({ owner: state.owner, activeBinding: state.activeBinding }));
+    }
+
+    async activateBinding(clientId: string, scopes: string[], resource: string, expectedBindingId: string | null): Promise<GPTBinding> {
+        return this.mutate((state) => {
+            if ((state.activeBinding?.id ?? null) !== expectedBindingId) throw new InvalidGrantError('binding changed; review and explicitly approve replacement');
+            // Revoke every previous credential in the same durable transaction as activation.
+            state.accessTokens = {}; state.refreshTokens = {};
+            const binding = { id: randomUUID(), clientId, scopes: [...scopes], resource, createdAt: new Date().toISOString() };
+            state.activeBinding = binding;
+            return structuredClone(binding);
+        });
+    }
+
+    async revokeBinding(expectedBindingId: string): Promise<void> {
+        await this.mutate((state) => {
+            if (!state.activeBinding || state.activeBinding.id !== expectedBindingId) throw new InvalidGrantError('binding changed; review before revoking');
+            state.accessTokens = {}; state.refreshTokens = {}; state.activeBinding = null;
+        });
     }
 
     async issueTokens(input: {
+        bindingId: string;
         clientId: string;
         scopes: string[];
         resource: string;
@@ -128,6 +159,7 @@ class PersistentOAuthRepository {
         const refreshToken = randomToken(48);
         const now = Math.floor(Date.now() / 1000);
         const access: PersistedTokenRecord = {
+            bindingId: input.bindingId,
             clientId: input.clientId,
             scopes: [...input.scopes],
             resource: input.resource,
@@ -140,7 +172,12 @@ class PersistentOAuthRepository {
         };
         await this.mutate((state) => {
             pruneExpiredTokens(state, now);
-            if (input.replaceRefreshTokenHash) delete state.refreshTokens[input.replaceRefreshTokenHash];
+            if (state.activeBinding?.id !== input.bindingId || state.activeBinding.clientId !== input.clientId) throw new InvalidGrantError('binding revoked or replaced');
+            if (input.replaceRefreshTokenHash) {
+                const previous = state.refreshTokens[input.replaceRefreshTokenHash];
+                if (!previous || previous.bindingId !== input.bindingId) throw new InvalidGrantError('refresh token already used or revoked');
+                delete state.refreshTokens[input.replaceRefreshTokenHash];
+            }
             state.accessTokens[hashToken(accessToken)] = access;
             state.refreshTokens[hashToken(refreshToken)] = refresh;
         });
@@ -164,10 +201,11 @@ class PersistentOAuthRepository {
 
     private async mutate<T>(mutator: (state: PersistedOAuthState) => T | Promise<T>): Promise<T> {
         return this.serialize(async () => {
-            const state = await this.load();
+            const state = structuredClone(await this.load());
             const value = await mutator(state);
             state.updatedAt = new Date().toISOString();
             await this.persist(state);
+            this.state = state;
             return value;
         });
     }
@@ -175,25 +213,37 @@ class PersistentOAuthRepository {
     private async load(): Promise<PersistedOAuthState> {
         if (this.state) return this.state;
         try {
-            const raw = JSON.parse(await readFile(this.path, 'utf8')) as PersistedOAuthState;
-            if (raw.schemaVersion !== 1 || !raw.clients || !raw.accessTokens || !raw.refreshTokens) {
-                throw new Error('invalid OAuth state file');
-            }
+            const raw = JSON.parse(await readFile(this.path, 'utf8'));
+            if (![1, 2].includes(raw.schemaVersion) || !raw.clients || !raw.accessTokens || !raw.refreshTokens) throw new Error('invalid OAuth state file');
             pruneExpiredTokens(raw, Math.floor(Date.now() / 1000));
+            if (raw.schemaVersion === 1) {
+                const records = [...Object.values(raw.accessTokens), ...Object.values(raw.refreshTokens)] as PersistedTokenRecord[];
+                const clients = new Set(records.map((record) => record.clientId));
+                if (clients.size > 1) throw new Error('ambiguous legacy OAuth grants; explicit migration required');
+                raw.schemaVersion = 2;
+                raw.owner = { id: randomUUID(), createdAt: new Date().toISOString() };
+                raw.activeBinding = records.length ? { id: randomUUID(), clientId: records[0].clientId, createdAt: new Date().toISOString(), scopes: [...new Set(records.flatMap(r => r.scopes))], resource: records[0].resource } : null;
+                for (const record of records) record.bindingId = raw.activeBinding.id;
+                await this.persist(raw);
+            }
+            if (!raw.owner?.id || !('activeBinding' in raw)) throw new Error('invalid owner/binding state');
             this.state = raw;
         } catch (error) {
             if (!(error && typeof error === 'object' && 'code' in error && (error as { code?: unknown }).code === 'ENOENT')) {
                 throw error;
             }
             this.state = {
-                schemaVersion: 1,
+                schemaVersion: 2,
+                owner: { id: randomUUID(), createdAt: new Date().toISOString() },
+                activeBinding: null,
                 updatedAt: new Date().toISOString(),
                 clients: {},
                 accessTokens: {},
                 refreshTokens: {},
             };
+            await this.persist(this.state);
         }
-        return this.state;
+        return this.state!;
     }
 
     private async persist(state: PersistedOAuthState): Promise<void> {
@@ -297,16 +347,32 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
         };
     }
 
-    async completeLocalApproval(requestId: string, userCode: string): Promise<URL> {
+    async edgeHealth() {
+        const response = await fetch(new URL('/.well-known/oauth-protected-resource/mcp', this.issuerUrl), { signal: AbortSignal.timeout(5000), redirect: 'error' });
+        const metadata = await response.json() as { resource?: string };
+        return { available: response.ok && metadata.resource === this.resourceUrl.href, checkedAt: new Date().toISOString() };
+    }
+
+    async bindingStatus() { return this.repo.status(); }
+
+    async revokeBinding(expectedBindingId: string): Promise<void> {
+        await this.repo.revokeBinding(expectedBindingId);
+        this.codes.clear();
+    }
+
+    async completeLocalApproval(requestId: string, userCode: string, expectedBindingId: string | null = null): Promise<URL> {
         this.cleanupEphemeralState();
         const pending = this.pending.get(requestId);
         if (!pending) throw new InvalidGrantError('authorization request expired or invalid');
         if (normalizeUserCode(userCode) !== normalizeUserCode(pending.userCode)) {
             throw new InvalidGrantError('verification code does not match authorization request');
         }
+        // Consume before awaiting storage so parallel approvals cannot mint duplicate codes.
         this.pending.delete(requestId);
+        const binding = await this.repo.activateBinding(pending.client.client_id, pending.scopes, this.resourceUrl.href, expectedBindingId);
         const code = randomToken(32);
         this.codes.set(code, {
+            bindingId: binding.id,
             clientId: pending.client.client_id,
             params: pending.params,
             scopes: [...pending.scopes],
@@ -342,7 +408,7 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
             throw new InvalidGrantError('resource does not match authorization request');
         }
         this.codes.delete(authorizationCode);
-        return this.issueOAuthTokens(client.client_id, code.scopes);
+        return this.issueOAuthTokens(client.client_id, code.scopes, code.bindingId);
     }
 
     async exchangeRefreshToken(
@@ -365,7 +431,7 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
         if (requestedScopes.some((scope) => !stored.scopes.includes(scope))) {
             throw new InvalidGrantError('refresh request cannot expand scopes');
         }
-        return this.issueOAuthTokens(client.client_id, requestedScopes, tokenHash);
+        return this.issueOAuthTokens(client.client_id, requestedScopes, stored.bindingId, tokenHash);
     }
 
     async verifyAccessToken(token: string): Promise<AuthInfo> {
@@ -401,10 +467,12 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
     private async issueOAuthTokens(
         clientId: string,
         scopes: string[],
+        bindingId: string,
         replaceRefreshTokenHash?: string,
     ): Promise<OAuthTokens> {
         this.validateScopes(scopes);
         const issued = await this.repo.issueTokens({
+            bindingId,
             clientId,
             scopes,
             resource: this.resourceUrl.href,

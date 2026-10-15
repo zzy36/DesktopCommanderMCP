@@ -1,3 +1,5 @@
+import { LocalAdminSecurity } from '../dist/remote-device/fleet/local-admin-security.js';
+import { adminSession } from './fleet-admin-session.js';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
@@ -145,7 +147,10 @@ const httpServer = createFleetOAuthPluginHttpServer({
   resourceUrl,
   approvalUrl,
 });
+const secret = randomBytes(32).toString('base64url');
+const adminSecurity = new LocalAdminSecurity(approvalUrl.origin, secret);
 const adminServer = createFleetAdminHttpServer(gateway, {
+  security: adminSecurity,
   basePath: '/admin',
   projects: [{ projectId: 'network.ikuai', hostname: 'YUAN', policyRevision }],
   oauthProvider: provider,
@@ -154,6 +159,7 @@ httpServer.listen(oauthPort, '127.0.0.1');
 await once(httpServer, 'listening');
 adminServer.listen(adminPort, '127.0.0.1');
 await once(adminServer, 'listening');
+const admin = await adminSession(approvalUrl.origin, secret);
 
 async function registerClient() {
   const response = await fetch(new URL('/register', issuerUrl), {
@@ -231,24 +237,30 @@ async function authorize(client, scopes, { wrongApprovalCode = false, wrongVerif
   });
   assert.equal(publicApprovalAttempt.status, 404);
 
+  const landing = await fetch(approvalUrl, { method: 'POST', redirect: 'manual', body: new URLSearchParams({ request_id: requestId, user_code: pending.userCode }) });
+  assert.equal(landing.status, 303);
+  assert(provider.getPendingAuthorization(requestId), 'cross-site landing must not approve');
+  const confirmUrl = new URL('/admin/approve', approvalUrl);
+  const current = (await provider.bindingStatus()).activeBinding;
+  const approvalFields = { request_id: requestId, expectedBindingId: current?.id ?? '', csrf: admin.csrf };
   if (wrongApprovalCode) {
-    const badApproval = await fetch(approvalUrl, {
+    const badApproval = await fetch(confirmUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ request_id: requestId, user_code: 'ZZZZ-ZZZZ' }),
+      headers: { ...admin.headers, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ ...approvalFields, user_code: 'ZZZZ-ZZZZ' }),
       redirect: 'manual',
     });
     assert.equal(badApproval.status, 400);
     assert(provider.getPendingAuthorization(requestId));
   }
 
-  const approvalResponse = await fetch(approvalUrl, {
+  const approvalResponse = await fetch(confirmUrl, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ request_id: requestId, user_code: pending.userCode }),
+    headers: { ...admin.headers, 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ ...approvalFields, user_code: pending.userCode }),
     redirect: 'manual',
   });
-  assert.equal(approvalResponse.status, 302);
+  assert.equal(approvalResponse.status, 303);
   const callbackLocation = approvalResponse.headers.get('location');
   assert(callbackLocation);
   const callback = new URL(callbackLocation);
@@ -334,7 +346,7 @@ try {
   assert.match(authenticateHeader, /resource_metadata=/i);
 
   const clientRegistration = await registerClient();
-  const fullTokens = await authorize(clientRegistration, ['fleet:read', 'fleet:write', 'offline_access'], {
+  let fullTokens = await authorize(clientRegistration, ['fleet:read', 'fleet:write', 'offline_access'], {
     wrongApprovalCode: true,
     wrongVerifier: true,
   });
@@ -375,6 +387,9 @@ try {
   assert.equal(deniedWrite.isError, true);
   assert.match(firstText(deniedWrite), /fleet:write/);
   assert.equal(await readFile(probeFile, 'utf8'), probe);
+
+  await assert.rejects(provider.verifyAccessToken(fullTokens.access_token), /invalid or expired/);
+  fullTokens = await authorize(clientRegistration, ['fleet:read', 'fleet:write', 'offline_access']);
 
   const refreshResponse = await fetch(new URL('/token', issuerUrl), {
     method: 'POST',

@@ -1,3 +1,4 @@
+import { AdminAccessError, LocalAdminSecurity } from './local-admin-security.js';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import { FleetGateway, FleetGatewayCallRecord } from './fleet-gateway.js';
 import { FleetEnrollmentStore } from './enrollment-store.js';
@@ -5,6 +6,9 @@ import type { DeviceBinding } from './protocol.js';
 import type { SingleUserOAuthProvider } from './single-user-oauth.js';
 
 export interface FleetAdminServerOptions {
+    security: LocalAdminSecurity;
+    release?: string;
+    onRevokeDevice?: (hostname: string) => void | Promise<void>;
     basePath?: string;
     projects: Array<{ projectId: string; hostname: string; policyRevision: string }>;
     enrollmentStore?: FleetEnrollmentStore;
@@ -19,7 +23,7 @@ export function createFleetAdminHttpServer(
     const basePath = normalizeBasePath(options.basePath ?? '/admin');
     return createServer((req, res) => {
         void handleRequest(req, res, gateway, options, basePath).catch((error) => {
-            sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+            sendJson(res, error instanceof AdminAccessError ? error.status : 400, { error: error instanceof Error ? error.message : String(error) });
         });
     });
 }
@@ -35,6 +39,64 @@ async function handleRequest(
     if (req.method === 'GET' && url.pathname === `${basePath}/healthz`) {
         return sendJson(res, 200, { ok: true, service: 'network-fleet-admin' });
     }
+    const security = options.security;
+    if (!security) throw new Error('local admin security is required');
+    // Public OAuth form landing is read-only. Final approval is a same-origin,
+    // authenticated CSRF form; cross-site POST can never activate a binding.
+    if (req.method === 'POST' && url.pathname === '/oauth/local-approve') {
+        const form = await readFormBody(req);
+        res.statusCode = 303;
+        res.setHeader('cache-control', 'no-store');
+        res.setHeader('location', `${security.origin}${basePath}/approve?request_id=${encodeURIComponent(form.request_id ?? '')}`);
+        res.end(); return;
+    }
+    if (url.pathname === `${basePath}/login`) {
+        if (req.method === 'GET') {
+            const nonce = security.loginNonce(res);
+            return sendHtml(res, 200, loginHtml(basePath, nonce, safeReturn(url.searchParams.get('return'), basePath)));
+        }
+        if (req.method === 'POST') {
+            const body = await readFormBody(req);
+            security.login(req, res, body.secret ?? '', body.nonce ?? '');
+            res.statusCode = 303; res.setHeader('location', safeReturn(body.return, basePath)); res.end(); return;
+        }
+    }
+    const protocol = ['/device/start', '/device/poll', '/pair/claim', '/pair/status'].includes(url.pathname);
+    if (!protocol && !security.session(req) && req.method === 'GET' && !url.pathname.includes('/api/')) {
+        res.statusCode = 303; res.setHeader('location', `${basePath}/login?return=${encodeURIComponent(url.pathname + url.search)}`); res.end(); return;
+    }
+    if (!protocol) security.requireSession(req);
+    if (!protocol && req.method !== 'GET' && req.method !== 'HEAD' && url.pathname !== `${basePath}/approve`) security.requireMutation(req);
+    if (req.method === 'GET' && url.pathname === `${basePath}/api/session`) return sendJson(res, 200, { csrf: security.requireSession(req).csrf });
+    if (req.method === 'POST' && url.pathname === `${basePath}/logout`) { security.logout(req, res); return sendJson(res, 200, { ok: true }); }
+    if (req.method === 'GET' && url.pathname === `${basePath}/api/binding`) return sendJson(res, 200, options.oauthProvider ? await options.oauthProvider.bindingStatus() : { disabled: true });
+    if (req.method === 'POST' && url.pathname === `${basePath}/api/binding/revoke`) {
+        if (!options.oauthProvider) return sendJson(res, 404, { error: 'OAuth disabled' });
+        const body = await readJsonBody(req);
+        await options.oauthProvider.revokeBinding(String(body.expectedBindingId ?? ''));
+        return sendJson(res, 200, { ok: true });
+    }
+    if (url.pathname === `${basePath}/approve`) {
+        if (!options.oauthProvider) return sendJson(res, 404, { error: 'OAuth disabled' });
+        if (req.method === 'GET') {
+            const pending = options.oauthProvider.getPendingAuthorization(url.searchParams.get('request_id') ?? '');
+            if (!pending) return sendHtml(res, 404, '<h1>授权请求已过期</h1>');
+            const { activeBinding } = await options.oauthProvider.bindingStatus();
+            const fields = { csrf: security.requireSession(req).csrf, request_id: pending.requestId, expectedBindingId: activeBinding?.id ?? '' };
+            return sendHtml(res, 200, `<h1>Local Control MCP</h1><h2>${activeBinding ? '替换当前 GPT 绑定' : '连接 GPT'}</h2><p>客户端：${escapeHtml(pending.clientName)}</p><p>权限：${escapeHtml(pending.scopes.join(', '))}</p><p>请对照 GPT 页面短码：<strong>${escapeHtml(pending.userCode)}</strong></p><p>${activeBinding ? '允许后，当前绑定及其所有令牌立即撤销。已登记设备保留。' : '允许此客户端访问 LCM 已授权设备。'}</p><form method="post" action="${basePath}/approve">${Object.entries(fields).map(([k,v]) => `<input type="hidden" name="${k}" value="${escapeHtml(v)}">`).join('')}<label>输入 GPT 页面短码 <input name="user_code" required autocomplete="off"></label><button>${activeBinding ? '撤销旧绑定并允许替换' : '允许连接'}</button></form>`);
+        }
+        if (req.method === 'POST') {
+            const form = await readFormBody(req);
+            security.requireMutation(req, form.csrf);
+            const redirect = await options.oauthProvider.completeLocalApproval(form.request_id ?? '', form.user_code ?? '', form.expectedBindingId || null);
+            res.statusCode = 303; res.setHeader('cache-control', 'no-store'); res.setHeader('location', redirect.href); res.end(); return;
+        }
+    }
+    if (req.method === 'POST' && url.pathname === `${basePath}/api/devices/revoke`) {
+        if (!options.onRevokeDevice) return sendJson(res, 404, { error: 'device revocation disabled' });
+        const body = await readJsonBody(req); await options.onRevokeDevice(String(body.hostname ?? ''));
+        return sendJson(res, 200, { ok: true });
+    }
     if (req.method === 'GET' && url.pathname === `${basePath}/api/status`) {
         return sendJson(res, 200, buildStatus(gateway, options));
     }
@@ -43,18 +105,15 @@ async function handleRequest(
         const limit = Number.isFinite(requested) ? Math.max(1, Math.min(100, Math.trunc(requested))) : 20;
         return sendJson(res, 200, { calls: redactCalls(gateway.listCallRecords(limit)) });
     }
+    if (req.method === 'GET' && url.pathname === `${basePath}/api/edge-health`) {
+        if (!options.oauthProvider) return sendJson(res, 200, { available: false });
+        try {
+            const metadata = await options.oauthProvider.edgeHealth();
+            return sendJson(res, 200, metadata);
+        } catch { return sendJson(res, 200, { available: false, checkedAt: new Date().toISOString() }); }
+    }
     if (req.method === 'GET' && url.pathname === `${basePath}/api/bootstrap`) {
         return sendJson(res, 200, bootstrapGuide());
-    }
-    if (req.method === 'POST' && url.pathname === '/oauth/local-approve') {
-        if (!options.oauthProvider) return sendJson(res, 404, { error: 'OAuth local approval is disabled' });
-        const form = await readFormBody(req);
-        const redirect = await options.oauthProvider.completeLocalApproval(String(form.request_id ?? ''), String(form.user_code ?? ''));
-        res.statusCode = 302;
-        res.setHeader('cache-control', 'no-store');
-        res.setHeader('location', redirect.href);
-        res.end();
-        return;
     }
     if (req.method === 'GET' && url.pathname === `${basePath}/api/pairings`) {
         if (!options.enrollmentStore) return sendJson(res, 404, { error: 'pairing is disabled' });
@@ -76,7 +135,7 @@ async function handleRequest(
             policyRevision: String(body.policy_revision ?? body.policyRevision ?? ''),
             codeChallenge: String(body.code_challenge ?? ''),
         });
-        const origin = externalOrigin(req);
+        const origin = options.security.origin;
         return sendJson(res, 200, {
             device_code: authorization.deviceCode,
             user_code: authorization.userCode,
@@ -108,7 +167,7 @@ async function handleRequest(
         if (!options.enrollmentStore) return sendHtml(res, 404, '<h1>设备验证功能未启用</h1>');
         const code = url.searchParams.get('code') ?? '';
         const authorization = code ? options.enrollmentStore.getDeviceAuthorizationByUserCode(code) : null;
-        return sendHtml(res, authorization ? 200 : (code ? 404 : 200), renderDeviceApprovalHtml(code, authorization, prefersChinese(req)));
+        return sendHtml(res, authorization ? 200 : (code ? 404 : 200), renderDeviceApprovalHtml(code, authorization, prefersChinese(req), security.requireSession(req).csrf));
     }
     if (req.method === 'POST' && url.pathname === '/pair/approve') {
         if (!options.enrollmentStore || !options.onApproveDevice) return sendJson(res, 404, { error: 'device authorization is disabled' });
@@ -143,17 +202,9 @@ async function handleRequest(
         return sendJson(res, 200, { ok: true, device });
     }
     if (req.method === 'GET' && (url.pathname === basePath || url.pathname === `${basePath}/`)) {
-        return sendHtml(res, 200, renderAdminHtml(basePath));
+        return sendHtml(res, 200, renderAdminHtml(basePath, security.requireSession(req).csrf));
     }
     return sendJson(res, 404, { error: 'not found' });
-}
-
-function externalOrigin(req: IncomingMessage): string {
-    const forwardedProto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim();
-    const proto = forwardedProto || ((req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http');
-    const forwardedHost = String(req.headers['x-forwarded-host'] ?? '').split(',')[0].trim();
-    const host = forwardedHost || String(req.headers.host ?? 'fleet-mcp.home.arpa:24443');
-    return `${proto}://${host}`;
 }
 
 function prefersChinese(req: IncomingMessage): boolean {
@@ -161,7 +212,7 @@ function prefersChinese(req: IncomingMessage): boolean {
     return !value || value.includes('zh');
 }
 
-function renderDeviceApprovalHtml(code: string, authorization: ReturnType<FleetEnrollmentStore['getDeviceAuthorizationByUserCode']>, zh: boolean): string {
+function renderDeviceApprovalHtml(code: string, authorization: ReturnType<FleetEnrollmentStore['getDeviceAuthorizationByUserCode']>, zh: boolean, csrf: string): string {
     const safeCode = escapeHtml(code);
     const title = zh ? 'LCM 设备验证' : 'LCM device verification';
     if (!code) {
@@ -189,7 +240,7 @@ function renderDeviceApprovalHtml(code: string, authorization: ReturnType<FleetE
     const okText = zh ? '设备已批准。请返回 PowerShell。' : 'Device approved. Return to PowerShell.';
     const errorPrefix = zh ? '错误：' : 'ERROR: ';
     const approvedStatus = zh ? '已批准' : 'approved';
-    return `<!doctype html><html lang="${zh ? 'zh-CN' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font-family:system-ui;background:#101214;color:#eef2f6;max-width:760px;margin:50px auto;padding:0 20px}.card{background:#181c20;border:1px solid #30363d;border-radius:16px;padding:24px}code{word-break:break-all}button{padding:12px 18px;border:0;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer}.muted{color:#a9b2bd}.ok{color:#66d19e}</style></head><body><h1>Local Control MCP（LCM）</h1><div class="card"><p class="muted">${intro}</p><h2>${host}</h2><p>${codeLabel}：<b style="font-size:24px">${safeCode}</b></p><p>${fingerprintLabel}：<code>${fingerprint}</code></p><p>${policyLabel}：<code>${policy}</code></p><p>${statusLabel}：<b id="status">${status}</b></p>${canApprove ? `<button id="approve">${approveText}</button>` : ''}<p id="message" class="ok"></p></div><script>${canApprove ? `document.getElementById('approve').onclick=async()=>{const b=document.getElementById('approve');b.disabled=true;const r=await fetch('/pair/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:${JSON.stringify(code)}})});const d=await r.json();if(r.ok){document.getElementById('status').textContent=${JSON.stringify(approvedStatus)};document.getElementById('message').textContent=${JSON.stringify(okText)};b.remove()}else{document.getElementById('message').textContent=${JSON.stringify(errorPrefix)}+(d.error||r.status);b.disabled=false}};` : ''}</script></body></html>`;
+    return `<!doctype html><html lang="${zh ? 'zh-CN' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font-family:system-ui;background:#101214;color:#eef2f6;max-width:760px;margin:50px auto;padding:0 20px}.card{background:#181c20;border:1px solid #30363d;border-radius:16px;padding:24px}code{word-break:break-all}button{padding:12px 18px;border:0;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer}.muted{color:#a9b2bd}.ok{color:#66d19e}</style></head><body><h1>Local Control MCP（LCM）</h1><div class="card"><p class="muted">${intro}</p><h2>${host}</h2><p>${codeLabel}：<b style="font-size:24px">${safeCode}</b></p><p>${fingerprintLabel}：<code>${fingerprint}</code></p><p>${policyLabel}：<code>${policy}</code></p><p>${statusLabel}：<b id="status">${status}</b></p>${canApprove ? `<button id="approve">${approveText}</button>` : ''}<p id="message" class="ok"></p></div><script>${canApprove ? `document.getElementById('approve').onclick=async()=>{const b=document.getElementById('approve');b.disabled=true;const r=await fetch('/pair/approve',{method:'POST',headers:{'content-type':'application/json','x-lcm-csrf':${JSON.stringify(csrf)}},body:JSON.stringify({code:${JSON.stringify(code)}})});const d=await r.json();if(r.ok){document.getElementById('status').textContent=${JSON.stringify(approvedStatus)};document.getElementById('message').textContent=${JSON.stringify(okText)};b.remove()}else{document.getElementById('message').textContent=${JSON.stringify(errorPrefix)}+(d.error||r.status);b.disabled=false}};` : ''}</script></body></html>`;
 }
 
 function escapeHtml(value: string): string {
@@ -203,11 +254,14 @@ function buildStatus(gateway: FleetGateway, options: FleetAdminServerOptions) {
     const devices = gateway.listKnownDeviceStatuses().map((status) => ({
         ...status,
         fingerprint: status.publicKeyFingerprint,
+        agentVersion: null, // Older agents do not advertise a release; never infer it from Gateway.
+        versionStatus: 'not-reported',
         projectId: projectsByHost.get(status.hostname) ?? null,
     }));
     return {
         ok: true,
         service: 'network-fleet-admin',
+        release: options.release ?? 'development',
         generatedAt: new Date().toISOString(),
         devices,
         projects: options.projects.map((project) => ({ ...project })),
@@ -294,23 +348,33 @@ function sendHtml(res: ServerResponse, status: number, body: string): void {
     res.end(body);
 }
 
-function renderAdminHtml(basePath: string): string {
+function renderAdminHtml(basePath: string, csrf: string): string {
     const api = JSON.stringify(basePath);
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Local Control MCP（LCM）</title><style>
 :root{font-family:Inter,system-ui,sans-serif;color-scheme:light dark}body{margin:0;background:#101214;color:#eef2f6}.wrap{max-width:1180px;margin:auto;padding:32px 20px}h1{font-size:30px;margin:0}.sub{color:#a9b2bd;margin:8px 0 28px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}.card{background:#181c20;border:1px solid #2a3037;border-radius:14px;padding:18px}.big{font-size:28px;font-weight:700}.ok{color:#66d19e}.bad{color:#ff8f8f}.warn{color:#ffd479}table{width:100%;border-collapse:collapse}.panel{margin-top:18px}.panel h2{font-size:18px}th,td{text-align:left;padding:10px;border-bottom:1px solid #2a3037;font-size:13px}code,pre,input{font-family:ui-monospace,Consolas,monospace}pre{white-space:pre-wrap;background:#0d0f11;padding:14px;border-radius:10px;overflow:auto}button{background:#e8edf2;color:#111;border:0;border-radius:9px;padding:9px 14px;font-weight:650;cursor:pointer}input{background:#0d0f11;color:#eef2f6;border:1px solid #38414b;border-radius:9px;padding:9px 11px;min-width:220px}.muted{color:#8e99a6}.pill{padding:3px 8px;border-radius:999px;background:#283039;display:inline-block;font-size:12px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}</style></head>
 <body><div class="wrap"><h1>Local Control MCP（LCM）</h1><div class="sub">自托管设备验证与项目隔离控制 · 不依赖官方 RDC 托管账号</div>
 <div class="grid"><div class="card"><div class="muted">网关</div><div class="big ok" id="gateway">检查中…</div></div><div class="card"><div class="muted">在线设备</div><div class="big" id="online">—</div></div><div class="card"><div class="muted">项目</div><div class="big" id="projects">—</div></div><div class="card"><div class="muted">更新时间</div><div class="big" style="font-size:16px" id="updated">—</div></div></div>
-<div class="panel card"><h2>设备</h2><table><thead><tr><th>设备</th><th>状态</th><th>项目</th><th>策略</th><th>最后在线</th></tr></thead><tbody id="devices"></tbody></table></div>
+<div class="panel card"><h2>发布 / 公网入口</h2><pre id="release">加载中</pre><p id="edgeHealth">公网入口检查中</p></div><div class="panel card"><h2>LCM Owner / GPT 绑定</h2><pre id="binding">加载中</pre><button id="revokeBinding">撤销 GPT 绑定</button><p class="muted">更换 GPT 时，从新 GPT 发起连接，再在本机明确批准替换。设备身份不会改变。</p></div><div class="panel card"><h2>设备</h2><table><thead><tr><th>设备</th><th>状态</th><th>项目</th><th>策略</th><th>最后在线</th><th>操作</th></tr></thead><tbody id="devices"></tbody></table></div>
 <div class="panel card"><h2>添加设备</h2><p class="muted">仅用于兼容旧手工配对流程。推荐新设备直接运行 <code>lcm remote</code>，通过浏览器短码完成验证。设备私钥始终保留在本机，配对不会授予任何项目权限。</p><div class="row"><input id="pairHost" placeholder="设备名"><button id="createPair">创建 10 分钟配对码</button></div><pre id="pairOutput">尚未创建配对码。</pre><table><thead><tr><th>设备</th><th>状态</th><th>指纹</th><th>过期时间</th><th>操作</th></tr></thead><tbody id="pairings"></tbody></table></div>
 <div class="panel card"><h2>最近调用</h2><table><thead><tr><th>项目</th><th>设备</th><th>工具</th><th>状态</th><th>代码</th></tr></thead><tbody id="calls"></tbody></table></div>
 <div class="panel card"><h2>新设备引导</h2><p class="muted">首次引导会安装本地插件和 SYSTEM 启动 Agent。项目授权仍必须来自该设备注册过的本地 <code>.control</code>。</p><button id="guide">加载引导说明</button><pre id="boot">尚未加载。</pre></div>
 </div><script>
 const base=${api}; const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function json(url,opts){const r=await fetch(url,{cache:'no-store',...opts});const d=await r.json();if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d}
-async function refresh(){try{const d=await json(base+'/api/status');document.getElementById('gateway').textContent=d.ok?'在线':'异常';document.getElementById('gateway').className='big '+(d.ok?'ok':'bad');document.getElementById('online').textContent=d.devices.filter(x=>x.online).length+'/'+d.devices.length;document.getElementById('projects').textContent=d.projects.length;document.getElementById('updated').textContent=new Date(d.generatedAt).toLocaleTimeString();document.getElementById('devices').innerHTML=d.devices.map(x=>'<tr><td>'+esc(x.hostname)+'</td><td><span class="pill '+(x.online?'ok':'bad')+'">'+(x.online?'在线':'离线')+'</span></td><td>'+esc(x.projectId??'未分配')+'</td><td>'+esc(x.policyRevision??'—')+'</td><td>'+esc(x.lastSeenAtMs?new Date(x.lastSeenAtMs).toLocaleString():'—')+'</td></tr>').join('');document.getElementById('calls').innerHTML=d.recentCalls.map(x=>'<tr><td>'+esc(x.projectId)+'</td><td>'+esc(x.hostname)+'</td><td>'+esc(x.toolName)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.code??'—')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">No calls recorded.</td></tr>';await refreshPairings()}catch(e){document.getElementById('gateway').textContent='不可用';document.getElementById('gateway').className='big bad'}}
+async function json(url,opts){const r=await fetch(url,{cache:'no-store',...opts,headers:{...opts?.headers,'x-lcm-csrf':${JSON.stringify(csrf)}}});const d=await r.json();if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d}
+async function refresh(){try{const d=await json(base+'/api/status');document.getElementById('gateway').textContent=d.ok?'在线':'异常';document.getElementById('gateway').className='big '+(d.ok?'ok':'bad');document.getElementById('online').textContent=d.devices.filter(x=>x.online).length+'/'+d.devices.length;document.getElementById('projects').textContent=d.projects.length;document.getElementById('updated').textContent=new Date(d.generatedAt).toLocaleTimeString();document.getElementById('devices').innerHTML=d.devices.map(x=>'<tr><td>'+esc(x.hostname)+'</td><td><span class="pill '+(x.online?'ok':'bad')+'">'+(x.online?'在线':'离线')+'</span></td><td>'+esc(x.projectId??'未分配')+'</td><td>'+esc(x.policyRevision??'—')+'</td><td>'+esc(x.lastSeenAtMs?new Date(x.lastSeenAtMs).toLocaleString():'—')+'</td><td><button data-revoke-device="'+esc(x.hostname)+'">撤销设备</button></td></tr>').join('');document.getElementById('calls').innerHTML=d.recentCalls.map(x=>'<tr><td>'+esc(x.projectId)+'</td><td>'+esc(x.hostname)+'</td><td>'+esc(x.toolName)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.code??'—')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">No calls recorded.</td></tr>';document.querySelectorAll('[data-revoke-device]').forEach(b=>b.onclick=async()=>{if(confirm('撤销设备 '+b.dataset.revokeDevice+'？设备将断开，需要本地重新批准。')){await json(base+'/api/devices/revoke',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:b.dataset.revokeDevice})});await refresh()}});document.getElementById('release').textContent='Gateway: '+d.release+'\\nAgent 版本：旧 Agent 未上报，查看已部署的发布清单。';await refreshPairings()}catch(e){document.getElementById('gateway').textContent='不可用';document.getElementById('gateway').className='big bad'}}
 async function refreshPairings(){try{const d=await json(base+'/api/pairings');document.getElementById('pairings').innerHTML=d.pairings.map(x=>'<tr><td>'+esc(x.hostname)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.fingerprint??'—')+'</td><td>'+esc(new Date(x.expiresAtMs).toLocaleTimeString())+'</td><td>'+(x.status==='claimed'?'<button data-approve="'+esc(x.id)+'">批准</button>':'—')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">No pairings.</td></tr>';document.querySelectorAll('[data-approve]').forEach(b=>b.onclick=async()=>{await json(base+'/api/pairings/'+encodeURIComponent(b.dataset.approve)+'/approve',{method:'POST'});await refresh()})}catch{}}
-document.getElementById('createPair').onclick=async()=>{try{const h=document.getElementById('pairHost').value.trim();const d=await json(base+'/api/pairings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:h})});document.getElementById('pairOutput').textContent='配对码（仅显示一次）：'+d.code+'\n设备：'+d.hostname+'\n过期时间：'+new Date(d.expiresAtMs).toLocaleString()+'\n\n兼容旧流程：在一次性 PowerShell 7 引导中使用此配对码，随后本页会显示设备指纹供批准。';await refreshPairings()}catch(e){document.getElementById('pairOutput').textContent='错误：'+e.message}};
-document.getElementById('guide').onclick=async()=>{const d=await json(base+'/api/bootstrap');document.getElementById('boot').textContent=d.flow.map((x,i)=>(i+1)+'. '+x).join('\n')+'\n\n'+Object.values(d.commands).join('\n')+'\n\n'+d.note};refresh();setInterval(refresh,5000);
+document.getElementById('createPair').onclick=async()=>{try{const h=document.getElementById('pairHost').value.trim();const d=await json(base+'/api/pairings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:h})});document.getElementById('pairOutput').textContent='配对码（仅显示一次）：'+d.code+'\\n设备：'+d.hostname+'\\n过期时间：'+new Date(d.expiresAtMs).toLocaleString()+'\\n\\n兼容旧流程：在一次性 PowerShell 7 引导中使用此配对码，随后本页会显示设备指纹供批准。';await refreshPairings()}catch(e){document.getElementById('pairOutput').textContent='错误：'+e.message}};
+document.getElementById('revokeBinding').onclick=async()=>{const b=await json(base+'/api/binding');if(b.activeBinding&&confirm('撤销当前 GPT 绑定及所有令牌？')){await json(base+'/api/binding/revoke',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({expectedBindingId:b.activeBinding.id})});await binding()}};async function binding(){document.getElementById('binding').textContent=JSON.stringify(await json(base+'/api/binding'),null,2)};binding();json(base+'/api/edge-health').then(d=>{document.getElementById('edgeHealth').textContent='公网 MCP: '+(d.available?'正常':'检查失败')});
+document.getElementById('guide').onclick=async()=>{const d=await json(base+'/api/bootstrap');document.getElementById('boot').textContent=d.flow.map((x,i)=>(i+1)+'. '+x).join('\\n')+'\\n\\n'+Object.values(d.commands).join('\\n')+'\\n\\n'+d.note};refresh();setInterval(refresh,5000);
 </script></body></html>`;
+}
+
+function safeReturn(value: string | null | undefined, base: string): string {
+    if (!value || !(value === base || value.startsWith(base + '/') || value.startsWith('/pair?'))) return base;
+    if (/[\\\r\n]/.test(value)) return base;
+    return value;
+}
+function loginHtml(base: string, nonce: string, returnTo: string): string {
+    return `<h1>Local Control MCP 管理中心</h1><p>仅本地管理员可管理 GPT 绑定和设备。输入恢复材料中的本地管理密钥。</p><form method="post" action="${base}/login"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><input type="hidden" name="return" value="${escapeHtml(returnTo)}"><input type="password" name="secret" required autocomplete="current-password"><button>登录</button></form>`;
 }

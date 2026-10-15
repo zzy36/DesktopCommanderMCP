@@ -380,6 +380,19 @@ export class FleetGateway {
         return { ...normalized };
     }
 
+    revokeDeviceBinding(hostnameInput: string): void {
+        const hostname = canonicalHostname(hostnameInput);
+        this.devices.delete(hostname);
+        this.router.revokeDeviceBinding(hostname);
+        for (const session of [...this.sessionsById.values()]) {
+            if (session.hostname !== hostname) continue;
+            this.rejectPendingForSession(session.sessionId, 'TARGET_OFFLINE', 'device revoked');
+            this.unregisterSession(session);
+            session.socket.close(1008, 'device revoked');
+        }
+        void this.audit.record({ event: 'device_revoked', hostname, outcome: 'revoked' });
+    }
+
     listKnownDeviceStatuses(): Array<FleetGatewayDeviceStatus & { publicKeyFingerprint: string }> {
         return [...this.devices.values()].map((device) => {
             const session = this.activeByHost.get(device.hostname);
