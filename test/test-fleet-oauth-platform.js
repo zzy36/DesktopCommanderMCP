@@ -17,11 +17,8 @@ import { FleetGateway } from '../dist/remote-device/fleet/fleet-gateway.js';
 import { FileGenerationStore } from '../dist/remote-device/fleet/gateway-state.js';
 import { FleetGatewayPluginBackend } from '../dist/remote-device/fleet/gateway-plugin-backend.js';
 import { createFleetOAuthPluginHttpServer } from '../dist/remote-device/fleet/oauth-plugin-server.js';
-import {
-  SingleUserOAuthProvider,
-  hashOwnerPassword,
-  verifyOwnerPasswordHash,
-} from '../dist/remote-device/fleet/single-user-oauth.js';
+import { createFleetAdminHttpServer } from '../dist/remote-device/fleet/admin-server.js';
+import { SingleUserOAuthProvider } from '../dist/remote-device/fleet/single-user-oauth.js';
 
 const controlRoot = process.env.FLEET_TEST_CONTROL_ROOT;
 assert(controlRoot, 'FLEET_TEST_CONTROL_ROOT is required');
@@ -31,8 +28,6 @@ const agentStateDir = join(runtimeDir, 'agent');
 const probeFile = join(runtimeDir, 'oauth-write-probe.txt');
 const generationFile = join(runtimeDir, 'gateway-generations.json');
 const oauthStateFile = join(runtimeDir, 'oauth-state.json');
-const ownerPassword = `owner-${randomBytes(18).toString('base64url')}`;
-const ownerPasswordHash = await hashOwnerPassword(ownerPassword);
 
 const authorizer = new ControlPolicyAuthorizer({ controlRoot });
 const policyRevision = await authorizer.policyRevision();
@@ -134,22 +129,31 @@ const backend = new FleetGatewayPluginBackend({
 });
 
 const oauthPort = await freePort();
+const adminPort = await freePort();
 const issuerUrl = new URL(`http://127.0.0.1:${oauthPort}/`);
 const resourceUrl = new URL('/mcp', issuerUrl);
+const approvalUrl = new URL(`http://127.0.0.1:${adminPort}/oauth/local-approve`);
 const provider = new SingleUserOAuthProvider({
   statePath: oauthStateFile,
   issuerUrl,
   resourceUrl,
-  verifyOwnerPassword: (password) => verifyOwnerPasswordHash(ownerPasswordHash, password),
 });
 const httpServer = createFleetOAuthPluginHttpServer({
   backend,
   provider,
   issuerUrl,
   resourceUrl,
+  approvalUrl,
+});
+const adminServer = createFleetAdminHttpServer(gateway, {
+  basePath: '/admin',
+  projects: [{ projectId: 'network.ikuai', hostname: 'YUAN', policyRevision }],
+  oauthProvider: provider,
 });
 httpServer.listen(oauthPort, '127.0.0.1');
 await once(httpServer, 'listening');
+adminServer.listen(adminPort, '127.0.0.1');
+await once(adminServer, 'listening');
 
 async function registerClient() {
   const response = await fetch(new URL('/register', issuerUrl), {
@@ -171,7 +175,7 @@ async function registerClient() {
   return client;
 }
 
-async function authorize(client, scopes, { wrongPassword = false, wrongVerifier = false } = {}) {
+async function authorize(client, scopes, { wrongApprovalCode = false, wrongVerifier = false } = {}) {
   const verifier = randomBytes(40).toString('base64url');
   const challenge = pkceChallenge(verifier);
   const state = randomBytes(16).toString('base64url');
@@ -187,41 +191,60 @@ async function authorize(client, scopes, { wrongPassword = false, wrongVerifier 
 
   const authResponse = await fetch(authorizeUrl, { redirect: 'manual' });
   assert.equal(authResponse.status, 302);
-  const loginLocation = authResponse.headers.get('location');
-  assert(loginLocation);
-  const loginUrl = new URL(loginLocation, issuerUrl);
-  assert.equal(loginUrl.pathname, '/oauth/login');
-  const requestId = loginUrl.searchParams.get('request_id');
+  const approvalLocation = authResponse.headers.get('location');
+  assert(approvalLocation);
+  const approvalPageUrl = new URL(approvalLocation, issuerUrl);
+  assert.equal(approvalPageUrl.pathname, '/oauth/approve');
+  const requestId = approvalPageUrl.searchParams.get('request_id');
   assert(requestId);
+  const pending = provider.getPendingAuthorization(requestId);
+  assert(pending);
+  assert.match(pending.userCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
 
-  const loginPage = await fetch(loginUrl, { headers: { 'accept-language': 'zh-CN,zh;q=0.9' } });
-  assert.equal(loginPage.status, 200);
-  const loginHtml = await loginPage.text();
-  assert.match(loginHtml, /Local Control MCP/);
-  assert.match(loginHtml, /所有者密码/);
+  const approvalPage = await fetch(approvalPageUrl, { headers: { 'accept-language': 'zh-CN,zh;q=0.9' } });
+  assert.equal(approvalPage.status, 200);
+  const approvalHtml = await approvalPage.text();
+  assert.match(approvalHtml, /Local Control MCP/);
+  assert.match(approvalHtml, /验证码/);
+  assert.match(approvalHtml, /允许/);
+  assert.doesNotMatch(approvalHtml, /所有者密码/);
+  assert.match(approvalHtml, new RegExp(pending.userCode.replace('-', '\\-')));
+  assert.match(approvalHtml, new RegExp(approvalUrl.href.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
-  const englishLoginPage = await fetch(loginUrl, { headers: { 'accept-language': 'en-US,en;q=0.9' } });
-  assert.equal(englishLoginPage.status, 200);
-  assert.match(await englishLoginPage.text(), /Owner password/);
+  const englishApprovalPage = await fetch(approvalPageUrl, { headers: { 'accept-language': 'en-US,en;q=0.9' } });
+  assert.equal(englishApprovalPage.status, 200);
+  const englishHtml = await englishApprovalPage.text();
+  assert.match(englishHtml, /Verification code/);
+  assert.match(englishHtml, />Allow</);
+  assert.doesNotMatch(englishHtml, /Owner password/);
 
-  if (wrongPassword) {
-    const badLogin = await fetch(new URL('/oauth/login', issuerUrl), {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ request_id: requestId, password: 'definitely-wrong-password' }),
-      redirect: 'manual',
-    });
-    assert.equal(badLogin.status, 401);
-  }
-
-  const loginResponse = await fetch(new URL('/oauth/login', issuerUrl), {
+  const publicApprovalAttempt = await fetch(new URL('/oauth/local-approve', issuerUrl), {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ request_id: requestId, password: ownerPassword }),
+    body: new URLSearchParams({ request_id: requestId, user_code: pending.userCode }),
     redirect: 'manual',
   });
-  assert.equal(loginResponse.status, 302);
-  const callbackLocation = loginResponse.headers.get('location');
+  assert.equal(publicApprovalAttempt.status, 404);
+
+  if (wrongApprovalCode) {
+    const badApproval = await fetch(approvalUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ request_id: requestId, user_code: 'ZZZZ-ZZZZ' }),
+      redirect: 'manual',
+    });
+    assert.equal(badApproval.status, 400);
+    assert(provider.getPendingAuthorization(requestId));
+  }
+
+  const approvalResponse = await fetch(approvalUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ request_id: requestId, user_code: pending.userCode }),
+    redirect: 'manual',
+  });
+  assert.equal(approvalResponse.status, 302);
+  const callbackLocation = approvalResponse.headers.get('location');
   assert(callbackLocation);
   const callback = new URL(callbackLocation);
   assert.equal(callback.searchParams.get('state'), state);
@@ -307,7 +330,7 @@ try {
 
   const clientRegistration = await registerClient();
   const fullTokens = await authorize(clientRegistration, ['fleet:read', 'fleet:write', 'offline_access'], {
-    wrongPassword: true,
+    wrongApprovalCode: true,
     wrongVerifier: true,
   });
 
@@ -388,7 +411,6 @@ try {
   assert.match(firstText(refreshedStatus), /"online": true/);
 
   const persistedStateText = await readFile(oauthStateFile, 'utf8');
-  assert.equal(persistedStateText.includes(ownerPassword), false);
   assert.equal(persistedStateText.includes(fullTokens.access_token), false);
   assert.equal(persistedStateText.includes(fullTokens.refresh_token), false);
   assert.equal(persistedStateText.includes(refreshedTokens.access_token), false);
@@ -398,7 +420,6 @@ try {
     statePath: oauthStateFile,
     issuerUrl,
     resourceUrl,
-    verifyOwnerPassword: (password) => verifyOwnerPasswordHash(ownerPasswordHash, password),
   });
   const persistedAuth = await providerAfterRestart.verifyAccessToken(refreshedTokens.access_token);
   assert.equal(persistedAuth.clientId, clientRegistration.client_id);
@@ -414,6 +435,7 @@ try {
   await readOnlyClient?.close().catch(() => undefined);
   await refreshedClient?.close().catch(() => undefined);
   await new Promise((resolve) => httpServer.close(resolve));
+  await new Promise((resolve) => adminServer.close(resolve));
   await agent.stop().catch(() => undefined);
   await gateway.stop().catch(() => undefined);
   await new Promise((resolve) => wsServer.close(resolve));

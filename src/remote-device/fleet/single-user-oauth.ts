@@ -1,9 +1,4 @@
-import {
-    createHash,
-    randomBytes,
-    scrypt as scryptCallback,
-    timingSafeEqual,
-} from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Response } from 'express';
@@ -28,7 +23,6 @@ const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const AUTHORIZATION_REQUEST_TTL_MS = 10 * 60 * 1000;
 const AUTHORIZATION_CODE_TTL_MS = 5 * 60 * 1000;
-const MAX_LOGIN_ATTEMPTS = 5;
 
 export const FLEET_OAUTH_SCOPES = ['fleet:read', 'fleet:write', 'offline_access'] as const;
 
@@ -54,7 +48,7 @@ interface PendingAuthorization {
     params: AuthorizationParams;
     scopes: string[];
     createdAtMs: number;
-    attempts: number;
+    userCode: string;
 }
 
 interface AuthorizationCodeRecord {
@@ -68,7 +62,6 @@ export interface SingleUserOAuthProviderOptions {
     statePath: string;
     issuerUrl: URL;
     resourceUrl: URL;
-    verifyOwnerPassword: (password: string) => boolean | Promise<boolean>;
     subject?: string;
     supportedScopes?: string[];
 }
@@ -80,6 +73,7 @@ export interface PendingAuthorizationView {
     redirectUri: string;
     scopes: string[];
     resource: string;
+    userCode: string;
 }
 
 class PersistentOAuthRepository {
@@ -248,7 +242,6 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
     private readonly repo: PersistentOAuthRepository;
     private readonly issuerUrl: URL;
     private readonly resourceUrl: URL;
-    private readonly verifyOwnerPassword: SingleUserOAuthProviderOptions['verifyOwnerPassword'];
     private readonly subject: string;
     private readonly supportedScopes: Set<string>;
     private readonly pending = new Map<string, PendingAuthorization>();
@@ -259,7 +252,6 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
         this.clientsStore = new PersistentClientsStore(this.repo);
         this.issuerUrl = new URL(options.issuerUrl.href);
         this.resourceUrl = normalizeResourceUrl(options.resourceUrl);
-        this.verifyOwnerPassword = options.verifyOwnerPassword;
         this.subject = options.subject ?? 'owner';
         this.supportedScopes = new Set(options.supportedScopes ?? FLEET_OAUTH_SCOPES);
     }
@@ -283,11 +275,11 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
             params,
             scopes: [...scopes],
             createdAtMs: Date.now(),
-            attempts: 0,
+            userCode: randomUserCode(),
         });
-        const loginUrl = new URL('/oauth/login', this.issuerUrl);
-        loginUrl.searchParams.set('request_id', requestId);
-        res.redirect(302, loginUrl.href);
+        const approvalUrl = new URL('/oauth/approve', this.issuerUrl);
+        approvalUrl.searchParams.set('request_id', requestId);
+        res.redirect(302, approvalUrl.href);
     }
 
     getPendingAuthorization(requestId: string): PendingAuthorizationView | null {
@@ -301,22 +293,16 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
             redirectUri: pending.params.redirectUri,
             scopes: [...pending.scopes],
             resource: pending.params.resource?.href ?? '',
+            userCode: pending.userCode,
         };
     }
 
-    async completeOwnerLogin(requestId: string, password: string): Promise<URL> {
+    async completeLocalApproval(requestId: string, userCode: string): Promise<URL> {
         this.cleanupEphemeralState();
         const pending = this.pending.get(requestId);
         if (!pending) throw new InvalidGrantError('authorization request expired or invalid');
-        pending.attempts += 1;
-        if (pending.attempts > MAX_LOGIN_ATTEMPTS) {
-            this.pending.delete(requestId);
-            throw new InvalidGrantError('too many failed login attempts');
-        }
-        const accepted = await this.verifyOwnerPassword(password);
-        if (!accepted) {
-            if (pending.attempts >= MAX_LOGIN_ATTEMPTS) this.pending.delete(requestId);
-            throw new InvalidGrantError('owner authentication failed');
+        if (normalizeUserCode(userCode) !== normalizeUserCode(pending.userCode)) {
+            throw new InvalidGrantError('verification code does not match authorization request');
         }
         this.pending.delete(requestId);
         const code = randomToken(32);
@@ -451,40 +437,6 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
     }
 }
 
-export async function hashOwnerPassword(password: string): Promise<string> {
-    if (password.length < 16) throw new Error('owner password must be at least 16 characters');
-    const salt = randomBytes(16);
-    const derived = await deriveScrypt(password, salt, 32);
-    return `scrypt$v1$${salt.toString('base64url')}$${derived.toString('base64url')}`;
-}
-
-export async function verifyOwnerPasswordHash(encoded: string, password: string): Promise<boolean> {
-    const [kind, version, saltEncoded, hashEncoded] = encoded.split('$');
-    if (kind !== 'scrypt' || version !== 'v1' || !saltEncoded || !hashEncoded) return false;
-    let salt: Buffer;
-    let expected: Buffer;
-    try {
-        salt = Buffer.from(saltEncoded, 'base64url');
-        expected = Buffer.from(hashEncoded, 'base64url');
-    } catch {
-        return false;
-    }
-    if (expected.length !== 32) return false;
-    const actual = await deriveScrypt(password, salt, expected.length);
-    return timingSafeEqual(actual, expected);
-}
-
-function deriveScrypt(password: string, salt: Buffer, keyLength: number): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-        scryptCallback(password, salt, keyLength, { N: 16_384, r: 8, p: 1 }, (error, derivedKey) => {
-            if (error) {
-                reject(error);
-                return;
-            }
-            resolve(derivedKey as Buffer);
-        });
-    });
-}
 function validateRedirectUri(value: string): void {
     let url: URL;
     try {
@@ -505,6 +457,18 @@ function normalizeResourceUrl(value: URL): URL {
     const url = new URL(value.href);
     url.hash = '';
     return url;
+}
+
+function normalizeUserCode(value: string): string {
+    return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function randomUserCode(): string {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = randomBytes(8);
+    let raw = '';
+    for (const byte of bytes) raw += alphabet[byte % alphabet.length];
+    return `${raw.slice(0, 4)}-${raw.slice(4)}`;
 }
 
 function randomToken(bytes: number): string {

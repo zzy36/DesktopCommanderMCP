@@ -53,7 +53,7 @@ const GatewayOAuthAuthSchema = z.object({
     type: z.literal('oauth'),
     issuerUrl: z.string().url(),
     resourceUrl: z.string().url(),
-    ownerPasswordHashEnv: z.string().min(1).default('FLEET_OWNER_PASSWORD_HASH'),
+    approvalUrl: z.string().url(),
 }).strict();
 
 const GatewayAdminSchema = z.object({
@@ -98,7 +98,7 @@ export interface ResolvedAgentServiceConfig {
 
 export type ResolvedGatewayAuth =
     | { type: 'bearer'; tokenEnv: string }
-    | { type: 'oauth'; issuerUrl: URL; resourceUrl: URL; ownerPasswordHashEnv: string };
+    | { type: 'oauth'; issuerUrl: URL; resourceUrl: URL; approvalUrl: URL };
 
 export interface ResolvedGatewayServiceConfig {
     mcpListenHost: string;
@@ -222,15 +222,17 @@ export async function loadGatewayServiceConfig(
     } else {
         const issuerUrl = new URL(raw.mcp.auth.issuerUrl);
         const resourceUrl = new URL(raw.mcp.auth.resourceUrl);
+        const approvalUrl = new URL(raw.mcp.auth.approvalUrl);
         if (resourceUrl.pathname !== '/mcp') throw new Error('OAuth resourceUrl path must be /mcp');
-        if (!isSecureUrl(issuerUrl, env) || !isSecureUrl(resourceUrl, env)) {
-            throw new Error('OAuth issuerUrl/resourceUrl must use https:// outside loopback tests');
+        if (approvalUrl.pathname !== '/oauth/local-approve') throw new Error('OAuth approvalUrl path must be /oauth/local-approve');
+        if (!isSecureUrl(issuerUrl, env) || !isSecureUrl(resourceUrl, env) || !isSecureUrl(approvalUrl, env)) {
+            throw new Error('OAuth issuerUrl/resourceUrl/approvalUrl must use https:// outside loopback tests');
         }
         mcpAuth = {
             type: 'oauth',
             issuerUrl,
             resourceUrl,
-            ownerPasswordHashEnv: raw.mcp.auth.ownerPasswordHashEnv,
+            approvalUrl,
         };
     }
 

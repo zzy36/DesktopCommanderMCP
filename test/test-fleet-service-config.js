@@ -80,7 +80,7 @@ try {
         type: 'oauth',
         issuerUrl: 'http://fleet-mcp.home.arpa/',
         resourceUrl: 'http://fleet-mcp.home.arpa/mcp',
-        ownerPasswordHashEnv: 'FLEET_OWNER_PASSWORD_HASH',
+        approvalUrl: 'http://fleet-mcp.home.arpa/oauth/local-approve',
       },
     },
   }));

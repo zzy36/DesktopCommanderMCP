@@ -11,7 +11,7 @@ import { FleetEnrollmentStore } from './enrollment-store.js';
 import { FileGenerationStore } from './gateway-state.js';
 import { createFleetOAuthPluginHttpServer } from './oauth-plugin-server.js';
 import { createFleetPluginHttpServer } from './plugin-server.js';
-import { verifyOwnerPasswordHash, SingleUserOAuthProvider } from './single-user-oauth.js';
+import { SingleUserOAuthProvider } from './single-user-oauth.js';
 import { ResolvedGatewayServiceConfig } from './service-config.js';
 
 export interface RunningFleetGatewayService {
@@ -49,7 +49,8 @@ export async function startFleetGatewayService(
         callTimeoutMs: config.callTimeoutMs,
     });
 
-    const mcpServer = createMcpServer(config, backend, env);
+    const mcpRuntime = createMcpServer(config, backend, env);
+    const mcpServer = mcpRuntime.server;
     const agentServer = createAgentHttpServer(config);
     const adminServer = config.adminListenPort !== undefined && config.adminListenHost && config.adminBasePath
         ? createFleetAdminHttpServer(gateway, {
@@ -57,6 +58,7 @@ export async function startFleetGatewayService(
             projects: config.projects,
             enrollmentStore,
             onApproveDevice: (device) => { gateway.addDeviceBinding(device); },
+            oauthProvider: mcpRuntime.oauthProvider,
         })
         : null;
     const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
@@ -124,31 +126,27 @@ function createMcpServer(
     config: ResolvedGatewayServiceConfig,
     backend: FleetGatewayPluginBackend,
     env: NodeJS.ProcessEnv,
-): Server {
+): { server: Server; oauthProvider?: SingleUserOAuthProvider } {
     if (config.mcpAuth.type === 'bearer') {
         const bearerToken = env[config.mcpAuth.tokenEnv];
         if (!bearerToken) {
             throw new Error(`missing MCP bearer token in environment variable ${config.mcpAuth.tokenEnv}`);
         }
-        return createFleetPluginHttpServer(backend, { bearerToken });
+        return { server: createFleetPluginHttpServer(backend, { bearerToken }) };
     }
 
-    const ownerPasswordHash = env[config.mcpAuth.ownerPasswordHashEnv];
-    if (!ownerPasswordHash) {
-        throw new Error(`missing OAuth owner password hash in environment variable ${config.mcpAuth.ownerPasswordHashEnv}`);
-    }
     const provider = new SingleUserOAuthProvider({
         statePath: path.join(config.stateDir, 'oauth-state.json'),
         issuerUrl: config.mcpAuth.issuerUrl,
         resourceUrl: config.mcpAuth.resourceUrl,
-        verifyOwnerPassword: (password) => verifyOwnerPasswordHash(ownerPasswordHash, password),
     });
-    return createFleetOAuthPluginHttpServer({
+    return { server: createFleetOAuthPluginHttpServer({
         backend,
         provider,
         issuerUrl: config.mcpAuth.issuerUrl,
         resourceUrl: config.mcpAuth.resourceUrl,
-    });
+        approvalUrl: config.mcpAuth.approvalUrl,
+    }), oauthProvider: provider };
 }
 
 function createAgentHttpServer(config: ResolvedGatewayServiceConfig): Server {

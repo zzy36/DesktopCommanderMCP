@@ -2,12 +2,14 @@ import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http
 import { FleetGateway, FleetGatewayCallRecord } from './fleet-gateway.js';
 import { FleetEnrollmentStore } from './enrollment-store.js';
 import type { DeviceBinding } from './protocol.js';
+import type { SingleUserOAuthProvider } from './single-user-oauth.js';
 
 export interface FleetAdminServerOptions {
     basePath?: string;
     projects: Array<{ projectId: string; hostname: string; policyRevision: string }>;
     enrollmentStore?: FleetEnrollmentStore;
     onApproveDevice?: (device: DeviceBinding) => void | Promise<void>;
+    oauthProvider?: SingleUserOAuthProvider;
 }
 
 export function createFleetAdminHttpServer(
@@ -43,6 +45,16 @@ async function handleRequest(
     }
     if (req.method === 'GET' && url.pathname === `${basePath}/api/bootstrap`) {
         return sendJson(res, 200, bootstrapGuide());
+    }
+    if (req.method === 'POST' && url.pathname === '/oauth/local-approve') {
+        if (!options.oauthProvider) return sendJson(res, 404, { error: 'OAuth local approval is disabled' });
+        const form = await readFormBody(req);
+        const redirect = await options.oauthProvider.completeLocalApproval(String(form.request_id ?? ''), String(form.user_code ?? ''));
+        res.statusCode = 302;
+        res.setHeader('cache-control', 'no-store');
+        res.setHeader('location', redirect.href);
+        res.end();
+        return;
     }
     if (req.method === 'GET' && url.pathname === `${basePath}/api/pairings`) {
         if (!options.enrollmentStore) return sendJson(res, 404, { error: 'pairing is disabled' });
@@ -226,7 +238,13 @@ function bootstrapGuide() {
     };
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readFormBody(req: IncomingMessage): Promise<Record<string, string>> {
+    const raw = await readRequestBody(req);
+    const params = new URLSearchParams(raw);
+    return Object.fromEntries(params.entries());
+}
+
+async function readRequestBody(req: IncomingMessage): Promise<string> {
     const chunks: Buffer[] = [];
     let total = 0;
     for await (const chunk of req) {
@@ -235,8 +253,13 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
         if (total > 64 * 1024) throw new Error('request body too large');
         chunks.push(buffer);
     }
-    if (chunks.length === 0) return {};
-    const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    return Buffer.concat(chunks).toString('utf8');
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+    const raw = await readRequestBody(req);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('JSON object required');
     return parsed as Record<string, unknown>;
 }

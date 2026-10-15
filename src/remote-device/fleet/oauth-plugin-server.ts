@@ -15,6 +15,7 @@ export interface FleetOAuthPluginServerOptions {
     issuerUrl: URL;
     resourceUrl: URL;
     serviceDocumentationUrl?: URL;
+    approvalUrl: URL;
 }
 
 export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions) {
@@ -33,36 +34,23 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
         res.status(200).json({ ok: true, service: 'network-fleet-plugin', ready: true });
     });
 
-    const loginParser = express.urlencoded({ extended: false, limit: '8kb' });
     app.get('/oauth/login', (req: Request, res: Response) => {
-        setLoginHeaders(res);
         const requestId = typeof req.query.request_id === 'string' ? req.query.request_id : '';
-        const pending = requestId ? options.provider.getPendingAuthorization(requestId) : null;
-        if (!pending) {
-            res.status(400).send(renderLoginError(prefersChinese(req) ? '此授权请求无效或已过期。' : 'This authorization request is invalid or expired.', prefersChinese(req)));
-            return;
-        }
-        res.status(200).send(renderLoginPage(pending.requestId, pending.clientName, pending.scopes, prefersChinese(req)));
+        const target = new URL('/oauth/approve', issuerUrl);
+        if (requestId) target.searchParams.set('request_id', requestId);
+        res.redirect(302, target.href);
     });
 
-    app.post('/oauth/login', loginParser, async (req: Request, res: Response) => {
-        setLoginHeaders(res);
-        const requestId = typeof req.body?.request_id === 'string' ? req.body.request_id : '';
-        const password = typeof req.body?.password === 'string' ? req.body.password : '';
-        if (!requestId || !password) {
-            res.status(400).send(renderLoginError(prefersChinese(req) ? '缺少授权请求或密码。' : 'Missing authorization request or password.', prefersChinese(req)));
+    app.get('/oauth/approve', (req: Request, res: Response) => {
+        setApprovalHeaders(res, options.approvalUrl);
+        const requestId = typeof req.query.request_id === 'string' ? req.query.request_id : '';
+        const pending = requestId ? options.provider.getPendingAuthorization(requestId) : null;
+        const zh = prefersChinese(req);
+        if (!pending) {
+            res.status(400).send(renderApprovalError(zh ? '此授权请求无效或已过期。' : 'This authorization request is invalid or expired.', zh));
             return;
         }
-        try {
-            const redirect = await options.provider.completeOwnerLogin(requestId, password);
-            res.redirect(302, redirect.href);
-        } catch {
-            const pending = options.provider.getPendingAuthorization(requestId);
-            const retryForm = pending
-                ? renderLoginPage(pending.requestId, pending.clientName, pending.scopes, prefersChinese(req), prefersChinese(req) ? '认证失败。' : 'Authentication failed.')
-                : renderLoginError(prefersChinese(req) ? '认证失败或授权请求已过期。' : 'Authentication failed or the authorization request expired.', prefersChinese(req));
-            res.status(401).send(retryForm);
-        }
+        res.status(200).send(renderApprovalPage(pending, options.approvalUrl, zh));
     });
 
     app.use(mcpAuthRouter({
@@ -150,9 +138,9 @@ function setNoStore(res: Response): void {
     res.setHeader('Pragma', 'no-cache');
 }
 
-function setLoginHeaders(res: Response): void {
+function setApprovalHeaders(res: Response, approvalUrl: URL): void {
     setNoStore(res);
-    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+    res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action ${approvalUrl.origin}; frame-ancestors 'none'; base-uri 'none'`);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY');
@@ -163,19 +151,20 @@ function prefersChinese(req: Request): boolean {
     return !value || value === '*' || value.includes('zh');
 }
 
-function renderLoginPage(
-    requestId: string,
-    clientName: string,
-    scopes: string[],
+function renderApprovalPage(
+    pending: ReturnType<SingleUserOAuthProvider['getPendingAuthorization']> extends infer T ? Exclude<T, null> : never,
+    approvalUrl: URL,
     zh: boolean,
-    errorMessage?: string,
 ): string {
-    const scopeLabel = scopes.length ? scopes.join(', ') : (zh ? '未请求显式权限范围' : 'No explicit scopes requested');
-    const title = zh ? '授权 Local Control MCP' : 'Authorize Local Control MCP';
+    const scopeLabel = pending.scopes.length ? pending.scopes.join(', ') : (zh ? '未请求显式权限范围' : 'No explicit scopes requested');
+    const title = zh ? '确认 Local Control MCP 授权' : 'Confirm Local Control MCP authorization';
     const clientLabel = zh ? '客户端' : 'Client';
     const accessLabel = zh ? '请求权限' : 'Requested access';
-    const passwordLabel = zh ? '所有者密码' : 'Owner password';
-    const buttonLabel = zh ? '授权' : 'Authorize';
+    const codeLabel = zh ? '验证码' : 'Verification code';
+    const intro = zh
+        ? '请核对验证码，然后点击“允许”。批准动作只会提交到你家里的 LCM 本地网关。'
+        : 'Verify the code, then click Allow. Approval is submitted only to your local LCM gateway.';
+    const buttonLabel = zh ? '允许' : 'Allow';
     return `<!doctype html>
 <html lang="${zh ? 'zh-CN' : 'en'}">
 <head>
@@ -183,25 +172,27 @@ function renderLoginPage(
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
 <style>
-body{font-family:system-ui,-apple-system,sans-serif;max-width:36rem;margin:4rem auto;padding:0 1.25rem;line-height:1.45;color:#111}label{display:block;margin:.8rem 0 .35rem}input{box-sizing:border-box;width:100%;padding:.7rem;border:1px solid #777;border-radius:.35rem}button{margin-top:1rem;padding:.7rem 1rem}code{overflow-wrap:anywhere}.error{color:#a00}
+body{font-family:system-ui,-apple-system,sans-serif;max-width:38rem;margin:4rem auto;padding:0 1.25rem;line-height:1.5;color:#111}.card{border:1px solid #d0d7de;border-radius:14px;padding:22px}.code{font:700 30px ui-monospace,Consolas,monospace;letter-spacing:.08em}button{margin-top:1rem;padding:.75rem 1.2rem;font-size:16px;font-weight:700}code{overflow-wrap:anywhere}.muted{color:#57606a}
 </style>
 </head>
 <body>
 <h1>Local Control MCP（LCM）</h1>
-<p>${clientLabel}：<strong>${escapeHtml(clientName)}</strong></p>
+<div class="card">
+<p class="muted">${intro}</p>
+<p>${clientLabel}：<strong>${escapeHtml(pending.clientName)}</strong></p>
 <p>${accessLabel}：<code>${escapeHtml(scopeLabel)}</code></p>
-${errorMessage ? `<p class="error">${escapeHtml(errorMessage)}</p>` : ''}
-<form method="post" action="/oauth/login" autocomplete="off">
-<input type="hidden" name="request_id" value="${escapeHtml(requestId)}">
-<label for="password">${passwordLabel}</label>
-<input id="password" name="password" type="password" required autocomplete="current-password">
+<p>${codeLabel}：</p><div class="code">${escapeHtml(pending.userCode)}</div>
+<form method="post" action="${escapeHtml(approvalUrl.href)}">
+<input type="hidden" name="request_id" value="${escapeHtml(pending.requestId)}">
+<input type="hidden" name="user_code" value="${escapeHtml(pending.userCode)}">
 <button type="submit">${buttonLabel}</button>
 </form>
+</div>
 </body>
 </html>`;
 }
 
-function renderLoginError(message: string, zh: boolean): string {
+function renderApprovalError(message: string, zh: boolean): string {
     const title = zh ? '授权错误' : 'Authorization error';
     return `<!doctype html><html lang="${zh ? 'zh-CN' : 'en'}"><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1><p>${escapeHtml(message)}</p></body></html>`;
 }
