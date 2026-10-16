@@ -5,6 +5,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { LCM_REMOTE_TOOL_CATALOG } from './lcm-remote-tool-catalog.js';
 import { localizeLcmTool, localizeLcmError } from './presentation-zh.js';
+import { LCM_ICONS, LCM_BRAND_TITLE } from './branding.js';
 
 export interface FleetPluginDeviceView {
     hostname: string;
@@ -172,12 +173,12 @@ export function createFleetPluginMcpServer(
 ): McpProtocolServer {
     const enforceScopes = options.enforceOAuthScopes === true;
     const server = new McpProtocolServer(
-        { name: 'local-control-mcp-remote', version: '0.3.5' },
+        { name: 'local-control-mcp-remote', title: LCM_BRAND_TITLE, icons: LCM_ICONS, version: '0.3.5' },
         { capabilities: { tools: {} }, instructions: 'Local Control MCP 远程通道：项目作用域默认使用准确 project_id + hostname；仅当用户对当前任务明确授权 machine_control 时，才可省略 project_id，并必须提供 machine_approval=true + 准确 hostname。两种作用域都由目标设备 .control 重新授权；不得因失败自动换项目、分区或设备。' },
     );
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: [...FLEET_CONTROL_TOOLS, ...LCM_REMOTE_TOOL_CATALOG].map(localizeLcmTool),
+        tools: [...FLEET_CONTROL_TOOLS, ...LCM_REMOTE_TOOL_CATALOG].map(localizeLcmTool).map(tool => ({ ...tool, icons: LCM_ICONS })),
     }));
 
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {

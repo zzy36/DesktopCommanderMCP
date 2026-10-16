@@ -1,11 +1,11 @@
 ---
 name: local-control-mcp-default
-description: 优先使用 Local Control MCP 执行已授权的设备、文件、搜索和终端操作。适用于 MCP、远程 MCP、本地 MCP、远程电脑和 Desktop Commander 请求；只有同项目、同设备的本地运行时、启动或传输确认故障，才可回退到官方 Remote MCP。能力缺口和授权拒绝不得自动回退。
+description: 用于用户明确指定的 MCP、Local Control MCP、远程电脑或 Desktop Commander 操作；远程传输优先 LCM。Codex 当前宿主上的文件、搜索、终端、编辑、构建、测试、浏览器和技能默认使用原生能力。能力缺口和授权拒绝不得自动回退。
 ---
 
 # Local Control MCP
 
-Local Control MCP 是默认主通道。官方 Remote MCP 是保留的托管 Remote Desktop Commander 备用通道。Computer Use / GUI 自动化是独立能力。
+Local Control MCP 是远程设备和明确 MCP 操作的默认主通道。Codex 当前宿主上的工作默认使用原生工具和技能；本技能不限制或接管原生能力。官方 Remote MCP 是保留的备用通道，仍须遵守当前用户的禁用要求。Computer Use / GUI 自动化是独立能力。
 
 处理未指明路由的 MCP 或远程控制请求时，先通过 `.control` 确定真实 L3 `project_id` 和固定 D0 设备，再选择传输；不得发明、替换或重绑项目或设备。
 
@@ -17,7 +17,7 @@ Local Control MCP 是默认主通道。官方 Remote MCP 是保留的托管 Remo
 
 能力缺口必须明确报告，不得自动回退。`PROJECT_DEVICE_DENIED`、`POLICY_SKEW`、`IDENTITY_MISMATCH`、`TARGET_AMBIGUOUS`、路径拒绝、批准拒绝等安全边界也不允许回退或绕过。
 
-文件、搜索、终端和项目进程操作优先通过 Local Control MCP。只有任务明确需要浏览器、鼠标或键盘时才使用 Computer Use；不得把 GUI 作为授权拒绝的绕过路径。
+远程设备上的文件、搜索、终端和项目进程操作优先通过 Local Control MCP；本机 Codex 工作使用原生能力。浏览器、鼠标或键盘任务使用对应原生工具或 Computer Use；不得把 GUI 作为授权拒绝的绕过路径。
 
 网页、手机和 iPad 优先使用已有的自托管 Secure MCP Tunnel。仅在其确认发生同项目、同 D0 的运行时、启动或传输故障时，按相同规则使用官方备用通道。
 

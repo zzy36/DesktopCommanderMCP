@@ -1,9 +1,7 @@
-import { ChildProcessWithoutNullStreams, execFile, spawn } from 'node:child_process';
+import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { createInterface, Interface as ReadlineInterface } from 'node:readline';
-import { promisify } from 'node:util';
 import { canonicalHostname } from './identity.js';
-
-const execFileAsync = promisify(execFile);
+import { resolveControlPolicyRevision } from './policy-revision.js';
 
 export interface ControlProjectAuthorization {
     scopeKind: 'project';
@@ -167,19 +165,7 @@ export class ControlPolicyAuthorizer {
 
     async policyRevision(): Promise<string> {
         try {
-            const { stdout } = await execFileAsync(
-                this.gitCommand,
-                ['-C', this.controlRoot, 'rev-parse', 'HEAD'],
-                {
-                    windowsHide: true,
-                    timeout: this.timeoutMs,
-                    maxBuffer: 64 * 1024,
-                    encoding: 'utf8',
-                },
-            );
-            const head = stdout.trim().toLowerCase();
-            if (!/^[0-9a-f]{40}$/.test(head)) throw new Error(`invalid git HEAD: ${head}`);
-            return `control@${head.slice(0, 12)}`;
+            return await resolveControlPolicyRevision(this.controlRoot, this.gitCommand, this.timeoutMs);
         } catch (error) {
             throw new ControlPolicyError(
                 'POLICY_SKEW',

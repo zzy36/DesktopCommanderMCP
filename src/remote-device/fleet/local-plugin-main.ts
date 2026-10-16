@@ -8,6 +8,7 @@ import { DesktopCommanderIntegration } from '../desktop-commander-integration.js
 import { ControlPolicyAuthorizer } from './control-policy.js';
 import { LCM_PROJECT_TOOLS, ProjectResourceScope, scopeProjectToolArgs, validateProjectToolPaths } from './project-tool-contract.js';
 import { localizeLcmTool, localizeLcmError } from './presentation-zh.js';
+import { LCM_ICONS, LCM_BRAND_TITLE } from './branding.js';
 
 const stderr = (...args: unknown[]) => process.stderr.write(`${args.map(formatLogValue).join(' ')}\n`);
 console.log = stderr;
@@ -51,6 +52,7 @@ function addProjectIdSchema(tool: any): any {
     : required;
   return {
     ...tool,
+        icons: LCM_ICONS,
     description: `Local Control MCP：在 ${localHostname} 执行；每次调用通过本机 .control 重新核对 project_id。${tool.description ?? ''}`.trim(),
     inputSchema: {
       ...original,
@@ -79,7 +81,7 @@ async function main(): Promise<void> {
   const byName = new Map(exposed.map((tool: any) => [tool.name, tool]));
 
   const server = new Server(
-    { name: 'local-control-mcp', version: '0.3.5' },
+    { name: 'local-control-mcp', title: LCM_BRAND_TITLE, icons: LCM_ICONS, version: '0.3.5' },
     { capabilities: { tools: {} }, instructions: 'Local Control MCP 是自托管项目控制主通道。每次调用必须提供真实 L3 project_id，并由本机 .control 重新授权。此服务不调用托管 RDC。' },
   );
 
