@@ -1,24 +1,18 @@
 ---
 name: local-control-mcp-default
-description: 用于用户明确指定的 MCP、Local Control MCP、远程电脑或 Desktop Commander 操作；远程传输优先 LCM。Codex 当前宿主上的文件、搜索、终端、编辑、构建、测试、浏览器和技能默认使用原生能力。能力缺口和授权拒绝不得自动回退。
+description: 用于明确 MCP 或远程设备操作。Codex 本机默认原生工具；远程 LCM 优先，同 D0 RDC 故障修复备用，恢复后回切。
 ---
 
 # Local Control MCP
 
-Local Control MCP 是远程设备和明确 MCP 操作的默认主通道。Codex 当前宿主上的工作默认使用原生工具和技能；本技能不限制或接管原生能力。官方 Remote MCP 是保留的备用通道，仍须遵守当前用户的禁用要求。Computer Use / GUI 自动化是独立能力。
+Codex 当前宿主的文件、搜索、终端、编辑、构建、测试、浏览器和技能默认使用原生能力。本技能只选择远程传输，不接管本机工具。普通 ChatGPT 需要机器控制时优先 LCM。
 
-处理未指明路由的 MCP 或远程控制请求时，先通过 `.control` 确定真实 L3 `project_id` 和固定 D0 设备，再选择传输；不得发明、替换或重绑项目或设备。
+先确定准确授权作用域和 D0。项目操作使用真实 L3 project_id、writer 与 physical_root；明确授权的 machine/common 维护直接使用准确 D0 和 machine_control scope，不借用业务项目身份。事实以目标 AGENTS/CURRENT/HANDOFF 与 Git 为准。
 
-优先使用 `local_control_mcp` server，每次调用都必须带准确的 `project_id`。Local Control MCP 会通过目标设备的 `.control` 重新授权；文件和搜索路径限于授权的 `physical_root`，终端从该根目录启动。项目事实以当前 AGENTS/CURRENT/HANDOFF 和 Git 为准。
+LCM 无托管额度成本，默认优先；RDC 有额度成本，是保留的备用通道。发现 LCM runtime/startup/transport、UI/管理入口、Computer Use 或 Cloud/private discovery 阻塞时，直接使用同作用域、同 D0 RDC 诊断、修复、部署、验证 LCM，不重复请示、不增加重试门槛。单个 UI gate 不阻断其他独立工作。
 
-仅当已授权的同项目、同 D0 发生确认的本地运行时不可用、启动失败或传输故障时，才按 L1 策略使用官方备用通道。官方 account/link 只是在固定 D0 后选择的 R0 传输，不改变设备或项目身份。
+回退不粘滞：后续普通操作轻量探测其实际所需的 LCM 能力，健康即回切。Agent 在线不等于 Cloud/common schema 已恢复。不重放结果不明确的写操作。保留 RDC，不卸载或禁用。
 
-回退不粘滞：每次新的用户级操作先轻量探测同 L3/D0 的 Local；恢复后立即返回 Local，再执行实际操作。不自动重放已提交、结果不明确的副作用操作。
+不得伪造 URL、身份或跨错设备/项目；授权拒绝本身不授予新权限。修复自有 LCM 仍遵守正常写入/lease/备份边界；破坏数据、新的未授权跨界写入、重建 OAuth/身份、不可逆删除才暂停确认。安全检查失败可以换合法工具/入口，不能绕过检查。
 
-能力缺口必须明确报告，不得自动回退。`PROJECT_DEVICE_DENIED`、`POLICY_SKEW`、`IDENTITY_MISMATCH`、`TARGET_AMBIGUOUS`、路径拒绝、批准拒绝等安全边界也不允许回退或绕过。
-
-远程设备上的文件、搜索、终端和项目进程操作优先通过 Local Control MCP；本机 Codex 工作使用原生能力。浏览器、鼠标或键盘任务使用对应原生工具或 Computer Use；不得把 GUI 作为授权拒绝的绕过路径。
-
-网页、手机和 iPad 优先使用已有的自托管 Secure MCP Tunnel。仅在其确认发生同项目、同 D0 的运行时、启动或传输故障时，按相同规则使用官方备用通道。
-
-远程操作需要已登录用户的 Git 凭据、浏览器/GUI 或用户环境时，使用 `execution_context: interactive`，并要求准确 D0 上有授权的用户桥接。用户会话缺失不允许改用 SYSTEM 或 RDC。进程/搜索后续调用继承原执行上下文，不得更换；后台任务可用 `system`。
+远程用户 Git 凭据、GUI、浏览器和用户环境使用准确 D0 的 execution_context: interactive；不复制凭据到 SYSTEM，不把用户会话缺失悄悄降级到 SYSTEM。后台工作可用 system，进程后续调用保持原执行上下文。网页/手机/iPad 优先已有自托管 Secure MCP。
