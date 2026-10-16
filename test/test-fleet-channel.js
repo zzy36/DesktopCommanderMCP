@@ -58,13 +58,15 @@ function waitForAccepted(timeoutMs = 2000) {
   });
 }
 
-function sendCall({ callId = randomUUID(), projectId = 'network.ikuai', hostname = 'YUAN', toolName = 'echo', args = {}, generationOverride } = {}) {
+function sendCall({ callId = randomUUID(), scopeKind = 'project', projectId = 'network.ikuai', machineApproval = false, hostname = 'YUAN', toolName = 'echo', args = {}, generationOverride } = {}) {
   assert(activeSocket, 'no active socket');
   const result = waitForResult(callId);
   activeSocket.send(JSON.stringify({
     type: 'call',
     callId,
+    scopeKind,
     projectId,
+    machineApproval,
     hostname,
     toolName,
     args,
@@ -126,6 +128,7 @@ const channel = new FleetChannel({
   callTimeoutMs: 500,
   random: () => 0.5,
   authorize: (projectId, hostname) => projectId === 'network.ikuai' && hostname === 'YUAN',
+  authorizeMachine: (hostname, explicitAuthorization) => hostname === 'YUAN' && explicitAuthorization === true,
   execute: async (toolName, args, context) => {
     if (toolName === 'echo') return { args, generation: context.generation };
     if (toolName === 'wait') {
@@ -153,8 +156,19 @@ let call = sendCall({ args: { value: 42 } });
 let result = await call.result;
 assert.equal(result.ok, true);
 assert.equal(result.result.args.value, 42);
-
+assert.equal(result.result.generation, generation);
 const duplicateCallId = call.callId;
+
+call = sendCall({ scopeKind: 'machine_control', projectId: null, machineApproval: false });
+result = await call.result;
+assert.equal(result.ok, false);
+assert.equal(result.code, 'PROJECT_DEVICE_DENIED');
+
+call = sendCall({ scopeKind: 'machine_control', projectId: null, machineApproval: true, args: { lane: 'machine' } });
+result = await call.result;
+assert.equal(result.ok, true);
+assert.equal(result.result.args.lane, 'machine');
+
 const duplicate = sendCall({ callId: duplicateCallId, args: { value: 999 } });
 result = await duplicate.result;
 assert.equal(result.ok, true);

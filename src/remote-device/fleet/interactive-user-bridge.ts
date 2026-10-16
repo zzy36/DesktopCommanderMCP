@@ -7,9 +7,9 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { DesktopCommanderIntegration } from '../desktop-commander-integration.js';
-import { ControlPolicyAuthorizer, ControlProjectAuthorization } from './control-policy.js';
+import { ControlAuthorization, ControlPolicyAuthorizer, ControlProjectAuthorization } from './control-policy.js';
 import { canonicalHostname } from './identity.js';
-import { ProjectResourceScope, scopeProjectToolArgs, validateProjectToolPaths } from './project-tool-contract.js';
+import { ProjectResourceScope, scopeMachineToolArgs, scopeProjectToolArgs, validateProjectToolPaths } from './project-tool-contract.js';
 
 const MAX_REQUEST = 1024 * 1024;
 const MAX_RESPONSE = 16 * 1024 * 1024;
@@ -22,13 +22,18 @@ function authentic(secret: string, body: string, signature: unknown): boolean {
     return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 interface Manifest { schemaVersion: 1; pipe: string; secret: string; hostname: string; pid: number; updatedAt: number; username: string; sessionId: number; }
-interface Request { id: string; timestamp: number; projectId: string; hostname: string; toolName: string; args: Record<string, unknown>; }
+interface Request { id: string; timestamp: number; scopeKind?: 'project' | 'machine_control'; projectId: string | null; machineApproval?: boolean; hostname: string; toolName: string; args: Record<string, unknown>; }
 interface Engine {
     initialize(): Promise<void>;
     shutdown(): Promise<void>;
     callClientTool(name: string, args: Record<string, unknown>, meta?: any, options?: any): Promise<any>;
 }
-interface Authorizer { warmup(): Promise<void>; authorize(projectId: string, hostname: string): Promise<ControlProjectAuthorization>; stop(): Promise<void>; }
+interface Authorizer {
+    warmup(): Promise<void>;
+    authorize(projectId: string, hostname: string): Promise<ControlProjectAuthorization>;
+    authorizeMachine(hostname: string, explicitAuthorization: boolean): Promise<ControlAuthorization>;
+    stop(): Promise<void>;
+}
 export interface InteractiveUserBridgeOptions {
     controlRoot: string; stateDir: string;
     desktop?: Engine; authorizer?: Authorizer;
@@ -85,13 +90,30 @@ export async function startInteractiveUserBridge(options: InteractiveUserBridgeO
                     if (used.has(request.id) || used.size >= 1000) throw error('interactive request replay denied', 'PROJECT_DEVICE_DENIED');
                     used.set(request.id, Date.now());
                     if (canonicalHostname(request.hostname) !== hostname) throw error('interactive target does not match this device', 'PROJECT_DEVICE_DENIED');
-                    const authorization = await authorizer.authorize(request.projectId, hostname);
-                    resources.assertOwned(request.toolName, request.projectId, request.args);
-                    const args = await scopeProjectToolArgs(request.toolName, request.args, authorization);
-                    await validateProjectToolPaths(request.toolName, args, authorization);
-                    const result = await desktop.callClientTool(request.toolName, args, { project_id: request.projectId, local_control_mcp: true, fleet_hostname: hostname, execution_context: 'interactive' }, { signal: controller.signal, timeout: 30_000, maxTotalTimeout: 30_000 });
-                    resources.record(request.toolName, request.projectId, result, args);
-                    response = { id: requestId, ok: true, result: resources.transform(request.toolName, request.projectId, authorization, result, hostname), executionContext: 'interactive' };
+                    const scopeKind = request.scopeKind === 'machine_control' ? 'machine_control' : 'project';
+                    if (scopeKind === 'project' && (!request.projectId || typeof request.projectId !== 'string')) throw error('project scope requires exact project_id', 'PROJECT_DEVICE_DENIED');
+                    if (scopeKind === 'machine_control' && request.projectId) throw error('machine_control scope must not borrow a project_id', 'PROJECT_DEVICE_DENIED');
+                    const authorization: ControlAuthorization = scopeKind === 'machine_control'
+                        ? await authorizer.authorizeMachine(hostname, request.machineApproval === true)
+                        : await authorizer.authorize(request.projectId!, hostname);
+                    const ownerKey = scopeKind === 'machine_control' ? `machine:${hostname}` : `project:${request.projectId}`;
+                    resources.assertOwned(request.toolName, ownerKey, request.args);
+                    const args = scopeKind === 'machine_control'
+                        ? scopeMachineToolArgs(request.toolName, request.args)
+                        : scopeProjectToolArgs(request.toolName, request.args, authorization as ControlProjectAuthorization);
+                    if (scopeKind === 'project') await validateProjectToolPaths(request.toolName, args, authorization as ControlProjectAuthorization);
+                    const result = await desktop.callClientTool(request.toolName, args, {
+                        ...(request.projectId ? { project_id: request.projectId } : {}),
+                        scope_kind: scopeKind, local_control_mcp: true, fleet_hostname: hostname, execution_context: 'interactive',
+                    }, { signal: controller.signal, timeout: 30_000, maxTotalTimeout: 30_000 });
+                    resources.record(request.toolName, ownerKey, result, args);
+                    response = {
+                        id: requestId, ok: true,
+                        result: scopeKind === 'machine_control'
+                            ? resources.transformMachine(request.toolName, ownerKey, result, hostname)
+                            : resources.transform(request.toolName, request.projectId!, authorization as ControlProjectAuthorization, result, hostname),
+                        executionContext: 'interactive',
+                    };
                 } catch (cause) {
                     response = { id: requestId, ok: false, error: cause instanceof Error ? cause.message : 'interactive execution failed', code: (cause as { code?: string })?.code ?? 'INTERACTIVE_EXECUTION_FAILED' };
                 }
@@ -119,14 +141,20 @@ export async function startInteractiveUserBridge(options: InteractiveUserBridgeO
 
 export class InteractiveUserClient {
     constructor(private readonly stateDir: string) {}
-    async callTool(toolName: string, args: Record<string, unknown>, projectId: string, hostname: string, signal?: AbortSignal): Promise<any> {
+    async callTool(
+        toolName: string, args: Record<string, unknown>, projectId: string | null, hostname: string, signal?: AbortSignal,
+        scopeKind: 'project' | 'machine_control' = 'project', machineApproval = false,
+    ): Promise<any> {
         let manifest: Manifest;
         try { manifest = JSON.parse(await readFile(path.join(this.stateDir, 'bridge.json'), 'utf8')); }
         catch { throw error('no interactive user session is available'); }
         const expected = canonicalHostname(hostname);
         if (manifest.schemaVersion !== 1 || manifest.hostname !== expected || expected !== canonicalHostname(os.hostname()) || Date.now() - manifest.updatedAt > MAX_AGE || manifest.updatedAt > Date.now() + 30_000 || manifest.secret?.length !== 43 || manifest.sessionId <= 0) throw error('interactive user session metadata is unavailable or invalid');
         if (process.platform === 'win32' && !manifest.pipe.startsWith(`\\\\.\\pipe\\lcm-user-${expected}-`)) throw error('interactive transport must be a local named pipe');
-        const request: Request = { id: randomUUID(), timestamp: Date.now(), projectId, hostname: expected, toolName, args };
+        if (scopeKind === 'project' && !projectId) throw error('project scope requires exact project_id', 'PROJECT_DEVICE_DENIED');
+        if (scopeKind === 'machine_control' && projectId) throw error('machine_control scope must not borrow a project_id', 'PROJECT_DEVICE_DENIED');
+        if (scopeKind === 'machine_control' && !machineApproval) throw error('machine_control scope requires explicit current-task authorization', 'PROJECT_DEVICE_DENIED');
+        const request: Request = { id: randomUUID(), timestamp: Date.now(), scopeKind, projectId, machineApproval, hostname: expected, toolName, args };
         const body = JSON.stringify(request); const frame = JSON.stringify({ body, signature: sign(manifest.secret, body) }) + '\n';
         if (Buffer.byteLength(frame) > MAX_REQUEST) throw error('interactive request exceeds size limit');
         return new Promise((resolve, reject) => {

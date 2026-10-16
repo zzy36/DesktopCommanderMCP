@@ -2,15 +2,16 @@ import { InteractiveUserClient } from './interactive-user-bridge.js';
 import os from 'node:os';
 import path from 'node:path';
 import { DesktopCommanderIntegration } from '../desktop-commander-integration.js';
-import { ControlPolicyAuthorizer, ControlPolicyError, ControlProjectAuthorization } from './control-policy.js';
+import { ControlAuthorization, ControlPolicyAuthorizer, ControlPolicyError, ControlProjectAuthorization } from './control-policy.js';
 import { DeviceIdentityStore, StoredFleetIdentity } from './device-identity.js';
 import { FleetChannel, FleetChannelOptions, FleetChannelState } from './fleet-channel.js';
 import { canonicalHostname } from './identity.js';
-import { ProjectResourceScope, scopeProjectToolArgs, validateProjectToolPaths } from './project-tool-contract.js';
+import { ProjectResourceScope, scopeMachineToolArgs, scopeProjectToolArgs, validateProjectToolPaths } from './project-tool-contract.js';
 
 export interface FleetToolPolicyContext {
-    authorization: ControlProjectAuthorization;
-    projectId: string;
+    authorization: ControlAuthorization;
+    scopeKind: 'project' | 'machine_control';
+    projectId: string | null;
     hostname: string;
     callId: string;
     generation: number;
@@ -179,20 +180,28 @@ export class FleetAgent {
             authorize: async (projectId, hostname) => {
                 const currentRevision = await this.authorizer.policyRevision();
                 if (currentRevision !== revision) {
-                    throw new ControlPolicyError(
-                        'POLICY_SKEW',
-                        'local .control policy changed after this Fleet session was authenticated',
-                        { sessionRevision: revision, currentRevision },
-                    );
+                    throw new ControlPolicyError('POLICY_SKEW', 'local .control policy changed after this Fleet session was authenticated', { sessionRevision: revision, currentRevision });
                 }
                 await this.authorizer.authorize(projectId, hostname);
                 return true;
             },
+            authorizeMachine: async (hostname, explicitAuthorization) => {
+                const currentRevision = await this.authorizer.policyRevision();
+                if (currentRevision !== revision) {
+                    throw new ControlPolicyError('POLICY_SKEW', 'local .control policy changed after this Fleet session was authenticated', { sessionRevision: revision, currentRevision });
+                }
+                await this.authorizer.authorizeMachine(hostname, explicitAuthorization);
+                return true;
+            },
             execute: async (toolName, args, context) => {
-                const authorization = await this.authorizer.authorize(context.projectId, context.hostname);
-                this.resources.assertOwned(toolName, context.projectId, args);
+                const authorization: ControlAuthorization = context.scopeKind === 'machine_control'
+                    ? await this.authorizer.authorizeMachine(context.hostname, context.machineApproval)
+                    : await this.authorizer.authorize(context.projectId!, context.hostname);
+                const ownerKey = context.scopeKind === 'machine_control' ? `machine:${context.hostname}` : `project:${context.projectId}`;
+                this.resources.assertOwned(toolName, ownerKey, args);
                 const safeArgs = await this.options.toolPolicy(toolName, args, {
                     authorization,
+                    scopeKind: context.scopeKind,
                     projectId: context.projectId,
                     hostname: context.hostname,
                     callId: context.callId,
@@ -205,9 +214,12 @@ export class FleetAgent {
                 const executionContext = explicitContext ?? ownerContext ?? 'system';
                 if (executionContext === 'interactive' && !this.options.interactiveStateDir) throw Object.assign(new Error('interactive user session is not configured; SYSTEM fallback is denied'), { code: 'INTERACTIVE_SESSION_UNAVAILABLE' });
                 const result = executionContext === 'interactive'
-                    ? await new InteractiveUserClient(this.options.interactiveStateDir!).callTool(toolName, safeArgs, context.projectId, context.hostname, context.signal)
+                    ? await new InteractiveUserClient(this.options.interactiveStateDir!).callTool(
+                        toolName, safeArgs, context.projectId, context.hostname, context.signal, context.scopeKind, context.machineApproval,
+                    )
                     : await this.desktop.callClientTool(toolName, safeArgs, {
-                    project_id: context.projectId,
+                    ...(context.projectId ? { project_id: context.projectId } : {}),
+                    scope_kind: context.scopeKind,
                     local_control_mcp: true,
                     fleet_hostname: context.hostname,
                     fleet_call_id: context.callId,
@@ -217,11 +229,13 @@ export class FleetAgent {
                     timeout: this.options.channel?.callTimeoutMs,
                     maxTotalTimeout: this.options.channel?.callTimeoutMs,
                 });
-                this.resources.record(toolName, context.projectId, result, safeArgs);
+                this.resources.record(toolName, ownerKey, result, safeArgs);
                 const text = JSON.stringify(result);
                 if (toolName === 'start_process') { const match = text.match(/Process started with PID\s+(\d+)/i); if (match) this.processContexts.set(Number(match[1]), executionContext as string); }
                 if (toolName === 'start_search') { const match = text.match(/search session:\s*([^\s"\\]+)/i); if (match) this.searchContexts.set(match[1], executionContext as string); }
-                return this.resources.transform(toolName, context.projectId, authorization, result, context.hostname);
+                return context.scopeKind === 'machine_control'
+                    ? this.resources.transformMachine(toolName, ownerKey, result, context.hostname)
+                    : this.resources.transform(toolName, context.projectId!, authorization as ControlProjectAuthorization, result, context.hostname);
             },
             ...this.options.channel,
         });
@@ -231,7 +245,13 @@ export class FleetAgent {
 }
 
 export function createProjectControlPolicy(): FleetToolPolicy {
-    return async (toolName, args, context) => { const safe = scopeProjectToolArgs(toolName, args, context.authorization); await validateProjectToolPaths(toolName, safe, context.authorization); return safe; };
+    return async (toolName, args, context) => {
+        if (context.scopeKind === 'machine_control') return scopeMachineToolArgs(toolName, args);
+        const authorization = context.authorization as ControlProjectAuthorization;
+        const safe = scopeProjectToolArgs(toolName, args, authorization);
+        await validateProjectToolPaths(toolName, safe, authorization);
+        return safe;
+    };
 }
 export function createProjectProbePolicy(
     fileName = '.network-fleet-plugin-probe.txt',
@@ -250,6 +270,9 @@ export function createProjectProbePolicy(
             throw Object.assign(new Error('project-probe policy does not accept a caller-supplied path'), {
                 code: 'PROJECT_DEVICE_DENIED',
             });
+        }
+        if (context.authorization.scopeKind !== 'project') {
+            throw Object.assign(new Error('project-probe policy does not permit machine/control scope'), { code: 'PROJECT_DEVICE_DENIED' });
         }
         const physicalRoot = context.authorization.physicalRoot;
         if (!physicalRoot) {

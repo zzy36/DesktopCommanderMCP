@@ -6,11 +6,22 @@ import { canonicalHostname } from './identity.js';
 const execFileAsync = promisify(execFile);
 
 export interface ControlProjectAuthorization {
+    scopeKind: 'project';
     projectId: string;
     partitionId: string | null;
     physicalRoot: string | null;
     deviceName: string;
 }
+
+export interface ControlMachineAuthorization {
+    scopeKind: 'machine_control';
+    projectId: null;
+    partitionId: null;
+    physicalRoot: null;
+    deviceName: string;
+}
+
+export type ControlAuthorization = ControlProjectAuthorization | ControlMachineAuthorization;
 
 export class ControlPolicyError extends Error {
     readonly code: 'PROJECT_DEVICE_DENIED' | 'POLICY_SKEW';
@@ -55,7 +66,16 @@ for line in sys.stdin:
     try:
         request = json.loads(line)
         request_id = request.get('id')
-        result = gateway._authorize_project(str(request['project_id']))
+        scope_kind = str(request.get('scope_kind') or 'project')
+        if scope_kind == 'machine_control':
+            result = gateway._authorize_machine_scope(
+                str(request.get('hostname') or ''),
+                explicit_authorization=(request.get('explicit_authorization') is True),
+            )
+        elif scope_kind == 'project':
+            result = gateway._authorize_project(str(request['project_id']))
+        else:
+            raise RuntimeError(f'unsupported scope_kind: {scope_kind}')
         payload = {'id': request_id, 'ok': True, 'result': result}
     except Exception as exc:
         payload = {'id': request_id, 'ok': False, 'error': str(exc)}
@@ -100,6 +120,7 @@ export class ControlPolicyAuthorizer {
                 );
             }
             return {
+                scopeKind: 'project',
                 projectId,
                 partitionId: typeof raw.partition_id === 'string' ? raw.partition_id : null,
                 physicalRoot: typeof raw.physical_root === 'string' ? raw.physical_root : null,
@@ -115,6 +136,31 @@ export class ControlPolicyAuthorizer {
                     hostname,
                     cause: error instanceof Error ? error.message : String(error),
                 },
+            );
+        }
+    }
+
+    async authorizeMachine(requestedHostname: string, explicitAuthorization: boolean): Promise<ControlMachineAuthorization> {
+        const hostname = canonicalHostname(requestedHostname);
+        if (!hostname) throw new ControlPolicyError('PROJECT_DEVICE_DENIED', 'machine/control scope requires exact hostname');
+        if (!explicitAuthorization) throw new ControlPolicyError('PROJECT_DEVICE_DENIED', 'machine/control scope requires explicit current-task authorization');
+        try {
+            const raw = await this.requestMachineAuthorization(hostname, explicitAuthorization);
+            const deviceName = typeof raw.device_name === 'string' ? raw.device_name : '';
+            if (!deviceName || canonicalHostname(deviceName) !== hostname || raw.scope_kind !== 'machine_control') {
+                throw new ControlPolicyError(
+                    'PROJECT_DEVICE_DENIED',
+                    'machine/control scope was authorized for a different local device',
+                    { requestedHostname: hostname, localDevice: deviceName || null },
+                );
+            }
+            return { scopeKind: 'machine_control', projectId: null, partitionId: null, physicalRoot: null, deviceName: canonicalHostname(deviceName) };
+        } catch (error) {
+            if (error instanceof ControlPolicyError) throw error;
+            throw new ControlPolicyError(
+                'PROJECT_DEVICE_DENIED',
+                `local .control policy denied machine/control scope on ${hostname}`,
+                { hostname, cause: error instanceof Error ? error.message : String(error) },
             );
         }
     }
@@ -164,15 +210,26 @@ export class ControlPolicyAuthorizer {
     }
 
     private requestAuthorization(projectId: string): Promise<Record<string, unknown>> {
+        return this.requestPolicy({ scope_kind: 'project', project_id: projectId }, `project ${projectId}`);
+    }
+
+    private requestMachineAuthorization(hostname: string, explicitAuthorization: boolean): Promise<Record<string, unknown>> {
+        return this.requestPolicy(
+            { scope_kind: 'machine_control', hostname, explicit_authorization: explicitAuthorization },
+            `machine ${hostname}`,
+        );
+    }
+
+    private requestPolicy(payload: Record<string, unknown>, label: string): Promise<Record<string, unknown>> {
         const child = this.ensureBridge();
         const id = ++this.requestCounter;
         return new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
                 this.pending.delete(id);
-                reject(new Error(`control policy request timed out: ${projectId}`));
+                reject(new Error(`control policy request timed out: ${label}`));
             }, this.timeoutMs);
             this.pending.set(id, { resolve, reject, timer });
-            child.stdin.write(`${JSON.stringify({ id, project_id: projectId })}\n`, (error) => {
+            child.stdin.write(`${JSON.stringify({ id, ...payload })}\n`, (error) => {
                 if (!error) return;
                 const pending = this.pending.get(id);
                 if (!pending) return;

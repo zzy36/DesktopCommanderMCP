@@ -962,5 +962,9 @@ export const LCM_REMOTE_TOOL_CATALOG: any[] = [
 
 // Execution identity is explicit and independent of D0/project authorization.
 for (const tool of LCM_REMOTE_TOOL_CATALOG) {
+  tool.inputSchema.properties.project_id.description = 'Exact target L3 project_id for project scope. Omit for explicit machine_control scope.';
+  tool.inputSchema.properties.scope_kind = { type: 'string', enum: ['project', 'machine_control'], default: 'project', description: 'Project scope is default. machine_control is only for an explicitly user-authorized current-task machine/control operation on the exact D0.' };
+  tool.inputSchema.properties.machine_approval = { type: 'boolean', default: false, description: 'Must be true for machine_control scope and must come from explicit current-task user authorization.' };
   tool.inputSchema.properties.execution_context = { type: 'string', enum: ['system', 'interactive'], description: 'Use interactive for Git credentials, browser/GUI, or logged-in user profile. Requires an authorized logged-in user on this exact D0; never falls back to SYSTEM.' };
+  tool.inputSchema.required = (tool.inputSchema.required ?? []).filter((name: string) => name !== 'project_id');
 }

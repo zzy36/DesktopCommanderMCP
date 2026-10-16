@@ -213,6 +213,12 @@ const backend = {
     if (!response.ok) throw Object.assign(new Error(response.error ?? response.code), { code: response.code });
     return response.result;
   },
+
+  async callMachineTool(hostname, toolName, args, explicitAuthorization) {
+    assert.equal(explicitAuthorization, true);
+    assert.equal(canonicalHostname(hostname), HOSTNAME);
+    return desktop.callClientTool(toolName, args, { scope_kind: 'machine_control', fleet_plugin_poc: true });
+  },
 };
 
 const httpServer = createFleetPluginHttpServer(backend);
@@ -257,6 +263,25 @@ const readResult = await client.callTool({
 });
 assert.equal(readResult.isError, undefined);
 assert.match(firstText(readResult), new RegExp(probe));
+
+const machineDenied = await client.callTool({
+  name: 'read_file',
+  arguments: { scope_kind: 'machine_control', machine_approval: false, hostname: HOSTNAME, path: testFile },
+});
+assert.equal(machineDenied.isError, true);
+
+const machineBorrowProject = await client.callTool({
+  name: 'read_file',
+  arguments: { scope_kind: 'machine_control', machine_approval: true, project_id: PROJECT_ID, hostname: HOSTNAME, path: testFile },
+});
+assert.equal(machineBorrowProject.isError, true);
+
+const machineRead = await client.callTool({
+  name: 'read_file',
+  arguments: { scope_kind: 'machine_control', machine_approval: true, hostname: HOSTNAME, path: testFile },
+});
+assert.equal(machineRead.isError, undefined);
+assert.match(firstText(machineRead), new RegExp(probe));
 
 const wrongHost = await client.callTool({
   name: 'write_file',

@@ -111,6 +111,35 @@ export function scopeProjectToolArgs(
   return args;
 }
 
+export function scopeMachineToolArgs(
+  toolName: string,
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!LCM_PROJECT_TOOLS.has(toolName)) {
+    throw Object.assign(new Error(`tool is not exposed by Local Control MCP: ${toolName}`), { code: 'PROJECT_DEVICE_DENIED' });
+  }
+  const args: Record<string, unknown> = { ...input };
+  delete args.project_id;
+  delete args.hostname;
+  delete args.scope_kind;
+  delete args.machine_approval;
+  delete args.execution_context;
+  if (toolName === 'read_file' && args.isUrl === true) {
+    throw Object.assign(new Error('read_file URL mode is disabled through Local Control MCP machine scope'), { code: 'PROJECT_DEVICE_DENIED' });
+  }
+  if (toolName === 'start_process') {
+    const command = typeof args.command === 'string' ? args.command : '';
+    if (!command.trim()) throw new Error('command is required');
+    const requestedShell = typeof args.shell === 'string' ? args.shell.toLowerCase() : '';
+    if (requestedShell && !requestedShell.includes('powershell') && !requestedShell.includes('pwsh')) {
+      throw Object.assign(new Error('machine/control start_process permits only PowerShell/pwsh'), { code: 'PROJECT_DEVICE_DENIED' });
+    }
+    args.shell = requestedShell || 'pwsh';
+    if (args.timeout_ms === undefined) args.timeout_ms = 3000;
+  }
+  return args;
+}
+
 export class ProjectResourceScope {
   private readonly ownedProcesses = new Map<number, string>();
   private readonly ownedSearches = new Map<string, string>();
@@ -119,13 +148,13 @@ export class ProjectResourceScope {
     if (toolName === 'read_process_output' || toolName === 'interact_with_process' || toolName === 'force_terminate' || toolName === 'kill_process') {
       const pid = Number(args.pid);
       if (!Number.isInteger(pid) || this.ownedProcesses.get(pid) !== projectId) {
-        throw Object.assign(new Error(`process ${String(args.pid)} is not owned by project ${projectId} in this LCM runtime`), { code: 'PROJECT_DEVICE_DENIED' });
+        throw Object.assign(new Error(`process ${String(args.pid)} is not owned by scope ${projectId} in this LCM runtime`), { code: 'PROJECT_DEVICE_DENIED' });
       }
     }
     if (toolName === 'get_more_search_results' || toolName === 'stop_search') {
       const sessionId = typeof args.sessionId === 'string' ? args.sessionId : '';
       if (!sessionId || this.ownedSearches.get(sessionId) !== projectId) {
-        throw Object.assign(new Error(`search ${sessionId || '<missing>'} is not owned by project ${projectId} in this LCM runtime`), { code: 'PROJECT_DEVICE_DENIED' });
+        throw Object.assign(new Error(`search ${sessionId || '<missing>'} is not owned by scope ${projectId} in this LCM runtime`), { code: 'PROJECT_DEVICE_DENIED' });
       }
     }
   }
@@ -162,6 +191,36 @@ export class ProjectResourceScope {
       ? raw.split(/\r?\n/).filter(line => { const match = line.match(/^PID:\s*(\d+)(?:\b|,)/); return match && owned.has(match[1]); })
       : raw.split(/\r?\n\s*\r?\n/).filter(block => { const match = block.match(/^Session:\s*([^\s]+)\s*$/m); return match && owned.has(match[1]); });
     return { content: [{ type: 'text', text: blocks.length ? blocks.join('\n\n') : (toolName === 'list_sessions' ? 'No LCM-owned terminal sessions.' : 'No LCM-owned searches.') }] };
+  }
+
+  transformMachine(toolName: string, ownerKey: string, result: any, deviceName: string): any {
+    if (toolName === 'get_config') return this.sanitizeMachineConfig(result, deviceName);
+    if (toolName !== 'list_sessions' && toolName !== 'list_searches') return result;
+    const raw = textFromToolResult(result);
+    const identifiers = toolName === 'list_sessions'
+      ? [...this.ownedProcesses.entries()].filter(([, owner]) => owner === ownerKey).map(([pid]) => String(pid))
+      : [...this.ownedSearches.entries()].filter(([, owner]) => owner === ownerKey).map(([id]) => id);
+    if (identifiers.length === 0) return { content: [{ type: 'text', text: toolName === 'list_sessions' ? 'No LCM-owned terminal sessions.' : 'No LCM-owned searches.' }] };
+    const owned = new Set(identifiers);
+    const blocks = toolName === 'list_sessions'
+      ? raw.split(/\r?\n/).filter(line => { const match = line.match(/^PID:\s*(\d+)(?:\b|,)/); return match && owned.has(match[1]); })
+      : raw.split(/\r?\n\s*\r?\n/).filter(block => { const match = block.match(/^Session:\s*([^\s]+)\s*$/m); return match && owned.has(match[1]); });
+    return { content: [{ type: 'text', text: blocks.length ? blocks.join('\n\n') : (toolName === 'list_sessions' ? 'No LCM-owned terminal sessions.' : 'No LCM-owned searches.') }] };
+  }
+
+  private sanitizeMachineConfig(result: any, deviceName: string): any {
+    const raw = textFromToolResult(result);
+    let parsed: any = null;
+    try { parsed = JSON.parse(raw); } catch { /* fallback below */ }
+    const source = parsed?.config && typeof parsed.config === 'object' ? parsed.config : parsed;
+    const safe = source && typeof source === 'object' ? {
+      product: 'Local Control MCP', scope_kind: 'machine_control', device_name: deviceName,
+      version: source.version, defaultShell: source.defaultShell,
+      fileReadLineLimit: source.fileReadLineLimit, fileWriteLineLimit: source.fileWriteLineLimit,
+      telemetryEnabled: source.telemetryEnabled, blockedCommands: source.blockedCommands,
+      systemInfo: source.systemInfo ? { platform: source.systemInfo.platform, platformName: source.systemInfo.platformName, isWindows: source.systemInfo.isWindows, isLinux: source.systemInfo.isLinux, isMacOS: source.systemInfo.isMacOS } : undefined,
+    } : { product: 'Local Control MCP', scope_kind: 'machine_control', device_name: deviceName };
+    return { content: [{ type: 'text', text: JSON.stringify(safe, null, 2) }] };
   }
 
   private sanitizeConfig(projectId: string, auth: ControlProjectAuthorization, result: any, deviceName: string): any {

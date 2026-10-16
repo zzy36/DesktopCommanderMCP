@@ -163,6 +163,18 @@ try {
   const readText = readResult?.content?.find?.((entry) => entry?.type === 'text')?.text ?? '';
   assert.match(readText, new RegExp(probe));
 
+  await assert.rejects(
+    currentGateway.dispatchMachine('YUAN', 'read_file', { path: probeFile }),
+    (error) => error?.code === 'PROJECT_DEVICE_DENIED',
+  );
+  const machineRead = await currentGateway.dispatchMachine('YUAN', 'read_file', { path: probeFile }, true);
+  const machineReadText = machineRead?.content?.find?.((entry) => entry?.type === 'text')?.text ?? '';
+  assert.match(machineReadText, new RegExp(probe));
+  await assert.rejects(
+    currentGateway.dispatchMachine('HEMA', 'read_file', { path: probeFile }, true),
+    (error) => error?.code === 'PROJECT_DEVICE_DENIED',
+  );
+
   const completed = currentGateway.listCallRecords(10);
   assert(completed.length >= 2);
   assert.equal(completed.every((record) => record.status === 'completed'), true);

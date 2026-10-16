@@ -70,6 +70,16 @@ export class FleetGatewayPluginBackend implements FleetPluginBackend {
         return this.gateway.dispatch(projectId, hostname, toolName, { ...args }, this.callTimeoutMs);
     }
 
+    async callMachineTool(
+        hostnameInput: string,
+        toolName: string,
+        args: Record<string, unknown>,
+        explicitAuthorization: boolean,
+    ): Promise<unknown> {
+        const hostname = canonicalHostname(hostnameInput);
+        return this.gateway.dispatchMachine(hostname, toolName, { ...args }, explicitAuthorization, this.callTimeoutMs);
+    }
+
     async ping(projectId: string, hostnameInput: string): Promise<Record<string, unknown>> {
         const hostname = canonicalHostname(hostnameInput);
         const status = this.gateway.deviceStatus(projectId, hostname);

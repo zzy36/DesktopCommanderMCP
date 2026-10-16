@@ -77,14 +77,16 @@ function waitForResult(callId, timeoutMs = 5000) {
   });
 }
 
-function callAgent({ projectId = 'network.ikuai', hostname = 'YUAN', toolName, args = {}, generationOverride } = {}) {
+function callAgent({ scopeKind = 'project', projectId = 'network.ikuai', machineApproval = false, hostname = 'YUAN', toolName, args = {}, generationOverride } = {}) {
   assert(activeSocket, 'no active Fleet Agent socket');
   const callId = randomUUID();
   const result = waitForResult(callId);
   activeSocket.send(JSON.stringify({
     type: 'call',
     callId,
+    scopeKind,
     projectId,
+    machineApproval,
     hostname,
     toolName,
     args,
@@ -196,6 +198,21 @@ try {
   assert.equal(result.ok, true);
   const readText = result.result?.content?.find?.((entry) => entry?.type === 'text')?.text ?? '';
   assert.match(readText, new RegExp(probe));
+
+  result = await callAgent({
+    scopeKind: 'machine_control', projectId: null, machineApproval: false,
+    toolName: 'read_file', args: { path: probeFile },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'PROJECT_DEVICE_DENIED');
+
+  result = await callAgent({
+    scopeKind: 'machine_control', projectId: null, machineApproval: true,
+    toolName: 'read_file', args: { path: probeFile },
+  });
+  assert.equal(result.ok, true);
+  const machineReadText = result.result?.content?.find?.((entry) => entry?.type === 'text')?.text ?? '';
+  assert.match(machineReadText, new RegExp(probe));
 
   result = await callAgent({
     toolName: 'write_file',

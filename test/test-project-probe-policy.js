@@ -9,11 +9,13 @@ try {
   const policy = createProjectProbePolicy('.fleet-probe.txt', 32);
   const context = {
     authorization: {
+      scopeKind: 'project',
       projectId: 'network.ikuai',
       partitionId: 'network',
       physicalRoot: root,
       deviceName: 'YUAN',
     },
+    scopeKind: 'project',
     projectId: 'network.ikuai',
     hostname: 'YUAN',
     callId: 'test-call',

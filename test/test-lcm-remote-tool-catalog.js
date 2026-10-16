@@ -10,10 +10,12 @@ assert.equal(new Set(names).size, names.length, 'remote LCM catalog contains dup
 for (const tool of LCM_REMOTE_TOOL_CATALOG) {
   assert.equal(tool.inputSchema?.type, 'object', `${tool.name} must have an object input schema`);
   const props = tool.inputSchema?.properties ?? {};
-  assert(props.project_id, `${tool.name} missing project_id`);
+  assert(props.project_id, `${tool.name} missing conditional project_id`);
   assert(props.hostname, `${tool.name} missing hostname`);
+  assert.deepEqual(props.scope_kind?.enum, ['project', 'machine_control'], `${tool.name} missing scope_kind contract`);
+  assert.equal(props.machine_approval?.type, 'boolean', `${tool.name} missing machine_approval contract`);
   const required = new Set(tool.inputSchema?.required ?? []);
-  assert(required.has('project_id'), `${tool.name} must require project_id`);
+  assert(!required.has('project_id'), `${tool.name} project_id must be conditionally required by project scope`);
   assert(required.has('hostname'), `${tool.name} must require hostname`);
   assert.equal(typeof tool.annotations?.readOnlyHint, 'boolean', `${tool.name} missing readOnlyHint`);
   assert.equal(typeof tool.annotations?.destructiveHint, 'boolean', `${tool.name} missing destructiveHint`);

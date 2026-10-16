@@ -16,6 +16,7 @@ export interface FleetPluginBackend {
     fleetStatus(projectId: string, hostname: string): Promise<Record<string, unknown>>;
     listDevices(projectId: string): Promise<FleetPluginDeviceView[]>;
     callProjectTool(projectId: string, hostname: string, toolName: string, args: Record<string, unknown>): Promise<unknown>;
+    callMachineTool(hostname: string, toolName: string, args: Record<string, unknown>, explicitAuthorization: boolean): Promise<unknown>;
     ping(projectId: string, hostname: string): Promise<Record<string, unknown>>;
     whoAmI(): Promise<Record<string, unknown>>;
     getToolResult(projectId: string, hostname: string, callId: string): Promise<Record<string, unknown>>;
@@ -172,7 +173,7 @@ export function createFleetPluginMcpServer(
     const enforceScopes = options.enforceOAuthScopes === true;
     const server = new McpProtocolServer(
         { name: 'local-control-mcp-remote', version: '0.3.5' },
-        { capabilities: { tools: {} }, instructions: 'Local Control MCP 远程通道：每个项目工具必须提供准确 project_id 和 hostname，并由目标设备的 .control 重新授权。运行中的调用只轮询，禁止重复提交副作用操作；授权拒绝或能力缺口不允许自动回退 RDC。' },
+        { capabilities: { tools: {} }, instructions: 'Local Control MCP 远程通道：项目作用域默认使用准确 project_id + hostname；仅当用户对当前任务明确授权 machine_control 时，才可省略 project_id，并必须提供 machine_approval=true + 准确 hostname。两种作用域都由目标设备 .control 重新授权；不得因失败自动换项目、分区或设备。' },
     );
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -222,11 +223,20 @@ export function createFleetPluginMcpServer(
             const definition = REMOTE_BY_NAME.get(toolName);
             if (!definition) return toolError(Object.assign(new Error(`tool is not exposed by Local Control MCP: ${toolName}`), { code: 'PROJECT_DEVICE_DENIED' }));
             requireScope(extra, definition.annotations?.readOnlyHint === true ? 'fleet:read' : 'fleet:write', enforceScopes);
-            const projectId = requiredString(args, 'project_id');
+            const scopeKind = args.scope_kind === 'machine_control' ? 'machine_control' : 'project';
             const hostname = requiredString(args, 'hostname');
             const forwarded = { ...args };
             delete forwarded.project_id;
             delete forwarded.hostname;
+            delete forwarded.scope_kind;
+            delete forwarded.machine_approval;
+            if (scopeKind === 'machine_control') {
+                const projectValue = typeof args.project_id === 'string' ? args.project_id.trim() : '';
+                if (projectValue) throw Object.assign(new Error('machine_control scope must not borrow a project_id'), { code: 'PROJECT_DEVICE_DENIED' });
+                if (args.machine_approval !== true) throw Object.assign(new Error('machine_control scope requires machine_approval=true from explicit current-task user authorization'), { code: 'PROJECT_DEVICE_DENIED' });
+                return await backend.callMachineTool(hostname, toolName, forwarded, args.machine_approval === true) as any;
+            }
+            const projectId = requiredString(args, 'project_id');
             return await backend.callProjectTool(projectId, hostname, toolName, forwarded) as any;
         } catch (error) {
             return toolError(error);

@@ -24,5 +24,20 @@ await assert.rejects(
   (error) => error?.code === 'PROJECT_DEVICE_DENIED',
 );
 
+const machine = await authorizer.authorizeMachine('YUAN', true);
+assert.equal(machine.scopeKind, 'machine_control');
+assert.equal(machine.projectId, null);
+assert.equal(machine.partitionId, null);
+assert.equal(machine.physicalRoot, null);
+assert.equal(machine.deviceName, 'YUAN');
+await assert.rejects(
+  authorizer.authorizeMachine('YUAN', false),
+  (error) => error?.code === 'PROJECT_DEVICE_DENIED',
+);
+await assert.rejects(
+  authorizer.authorizeMachine('HEMA', true),
+  (error) => error?.code === 'PROJECT_DEVICE_DENIED',
+);
+
 await authorizer.stop();
 console.log(`control policy tests passed (${revision})`);

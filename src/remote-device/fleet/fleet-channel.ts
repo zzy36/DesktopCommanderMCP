@@ -1,8 +1,12 @@
 import { sign } from 'node:crypto';
 import { canonicalHostname, handshakePayload } from './identity.js';
 
+export type FleetScopeKind = 'project' | 'machine_control';
+
 export interface FleetChannelExecutorContext {
-    projectId: string;
+    scopeKind: FleetScopeKind;
+    projectId: string | null;
+    machineApproval: boolean;
     hostname: string;
     callId: string;
     generation: number;
@@ -23,6 +27,7 @@ export interface FleetChannelOptions {
     publicKeyPem: string;
     privateKey: Parameters<typeof sign>[2];
     authorize: (projectId: string, hostname: string) => boolean | Promise<boolean>;
+    authorizeMachine?: (hostname: string, explicitAuthorization: boolean) => boolean | Promise<boolean>;
     execute: FleetChannelExecutor;
     reconnectBaseMs?: number;
     reconnectMaxMs?: number;
@@ -237,12 +242,14 @@ export class FleetChannel {
 
     private async handleCall(message: FleetWireMessage): Promise<void> {
         const callId = typeof message.callId === 'string' ? message.callId : null;
-        const projectId = typeof message.projectId === 'string' ? message.projectId : null;
+        const scopeKind: FleetScopeKind = message.scopeKind === 'machine_control' ? 'machine_control' : 'project';
+        const projectId = typeof message.projectId === 'string' && message.projectId.trim() ? message.projectId : null;
+        const machineApproval = message.machineApproval === true;
         const hostname = typeof message.hostname === 'string' ? canonicalHostname(message.hostname) : null;
         const toolName = typeof message.toolName === 'string' ? message.toolName : null;
         const generation = typeof message.generation === 'number' ? message.generation : null;
         const args = this.isRecord(message.args) ? message.args : {};
-        if (!callId || !projectId || !hostname || !toolName || generation === null) {
+        if (!callId || !hostname || !toolName || generation === null || (scopeKind === 'project' && !projectId)) {
             throw new Error('invalid call message');
         }
 
@@ -260,7 +267,12 @@ export class FleetChannel {
             return;
         }
         try {
-            if (!(await this.options.authorize(projectId, hostname))) {
+            if (scopeKind === 'machine_control') {
+                if (!machineApproval || !this.options.authorizeMachine || !(await this.options.authorizeMachine(hostname, machineApproval))) {
+                    this.sendResult({ callId, generation, ok: false, code: 'PROJECT_DEVICE_DENIED' });
+                    return;
+                }
+            } else if (!(await this.options.authorize(projectId!, hostname))) {
                 this.sendResult({ callId, generation, ok: false, code: 'PROJECT_DEVICE_DENIED' });
                 return;
             }
@@ -296,7 +308,9 @@ export class FleetChannel {
         try {
             const result = await Promise.race([
                 this.options.execute(toolName, args, {
+                    scopeKind,
                     projectId,
+                    machineApproval,
                     hostname,
                     callId,
                     generation,

@@ -8,8 +8,8 @@ import { startInteractiveUserBridge, InteractiveUserClient } from '../dist/remot
 const root=await mkdtemp(path.join(os.tmpdir(),'lcm-user-'));
 const hostname=os.hostname().split('.')[0].toUpperCase();
 let executed=0,authorized=0;
-const authorizer={warmup:async()=>{},stop:async()=>{},authorize:async(projectId,host)=>{authorized++;if(projectId!=='network.local-control-mcp'||host!==hostname)throw Object.assign(new Error('denied'),{code:'PROJECT_DEVICE_DENIED'});return {projectId,deviceName:host,physicalRoot:root,partitionId:'network'}}};
-const desktop={initialize:async()=>{},shutdown:async()=>{},callClientTool:async(name,args,meta)=>{executed++;assert.equal(meta.execution_context,'interactive');assert.equal(args.execution_context,undefined);if(name==='start_process'){assert.match(args.command,/FLEET_PROJECT_ID/);return {content:[{type:'text',text:'Process started with PID 5678\n中文输出'}]}}return {content:[{type:'text',text:'中文输出🙂'}]}}};
+const authorizer={warmup:async()=>{},stop:async()=>{},authorize:async(projectId,host)=>{authorized++;if(projectId!=='network.local-control-mcp'||host!==hostname)throw Object.assign(new Error('denied'),{code:'PROJECT_DEVICE_DENIED'});return {scopeKind:'project',projectId,deviceName:host,physicalRoot:root,partitionId:'network'}},authorizeMachine:async(host,explicit)=>{authorized++;if(host!==hostname||explicit!==true)throw Object.assign(new Error('machine denied'),{code:'PROJECT_DEVICE_DENIED'});return {scopeKind:'machine_control',projectId:null,deviceName:host,physicalRoot:null,partitionId:null}}};
+const desktop={initialize:async()=>{},shutdown:async()=>{},callClientTool:async(name,args,meta)=>{executed++;assert.equal(meta.execution_context,'interactive');assert.equal(args.execution_context,undefined);if(name==='start_process'){if(meta.scope_kind==='machine_control'){assert.doesNotMatch(args.command,/FLEET_PROJECT_ID/);return {content:[{type:'text',text:'Process started with PID 6789\n机器输出'}]}}assert.match(args.command,/FLEET_PROJECT_ID/);return {content:[{type:'text',text:'Process started with PID 5678\n中文输出'}]}}return {content:[{type:'text',text:'中文输出🙂'}]}}};
 const bridge=await startInteractiveUserBridge({stateDir:path.join(root,'state'),controlRoot:root,desktop,authorizer,...(process.platform==='win32'?{}:{testSocket:path.join(root,'test.sock')})});
 const client=new InteractiveUserClient(path.join(root,'state'));
 const raw=async(envelope)=>{
@@ -21,6 +21,13 @@ try{
  const start=await client.callTool('start_process',{command:'whoami',execution_context:'interactive'},'network.local-control-mcp',hostname);assert.match(JSON.stringify(start),/5678/);
  await client.callTool('read_process_output',{pid:5678},'network.local-control-mcp',hostname);
  await assert.rejects(client.callTool('read_process_output',{pid:9999},'network.local-control-mcp',hostname),/not owned/);
+ await assert.rejects(client.callTool('read_file',{path:'fixture'},null,hostname,undefined,'machine_control',false),/explicit current-task authorization/);
+ await assert.rejects(client.callTool('read_file',{path:'fixture'},'network.local-control-mcp',hostname,undefined,'machine_control',true),/must not borrow/);
+ const machineRead=await client.callTool('read_file',{path:'fixture.txt'},null,hostname,undefined,'machine_control',true);assert.match(JSON.stringify(machineRead),/中文输出/);
+ const machineStart=await client.callTool('start_process',{command:'whoami',execution_context:'interactive'},null,hostname,undefined,'machine_control',true);assert.match(JSON.stringify(machineStart),/6789/);
+ await client.callTool('read_process_output',{pid:6789},null,hostname,undefined,'machine_control',true);
+ await assert.rejects(client.callTool('read_process_output',{pid:6789},'network.local-control-mcp',hostname),/not owned/);
+ await assert.rejects(client.callTool('read_process_output',{pid:5678},null,hostname,undefined,'machine_control',true),/not owned/);
  await assert.rejects(client.callTool('read_file',{path:'../escape'},'network.local-control-mcp',hostname),/escapes/);
  await assert.rejects(client.callTool('read_file',{path:'fixture'},'wrong.project',hostname),/denied/);
  await assert.rejects(client.callTool('read_file',{path:'fixture'},'network.local-control-mcp','WRONGHOST'),/metadata/);
