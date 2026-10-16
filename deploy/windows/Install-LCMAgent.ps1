@@ -31,6 +31,10 @@ if(-not(Test-Path -LiteralPath $runtime)){
   if($LASTEXITCODE -ne 0){throw 'Pinned dependency installation failed'}
   & npm.cmd run build | Out-Null
   if($LASTEXITCODE -ne 0){throw 'Runtime build failed'}
+  # npm ci deliberately skips lifecycle scripts; restore only the required,
+  # pinned Microsoft ripgrep dependency hook, without root telemetry/install hooks.
+  & $node node_modules/@vscode/ripgrep/lib/postinstall.js | Out-Null
+  if($LASTEXITCODE -ne 0){throw 'Pinned search dependency installation failed'}
   & $node dist/npm-scripts/verify-ripgrep.js | Out-Null
   if($LASTEXITCODE -ne 0){throw 'Search runtime verification failed'}
   [IO.File]::WriteAllText((Join-Path $source[0].FullName 'LCM_RELEASE'),$Release,[Text.UTF8Encoding]::new($false))
