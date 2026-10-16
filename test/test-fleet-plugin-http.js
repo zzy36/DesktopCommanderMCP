@@ -1,3 +1,8 @@
+import { skip } from './helpers/run-if-main.js';
+if (process.env.LCM_RUN_LEGACY_PROJECT_CONTRACT_TESTS !== '1') {
+  skip('legacy project-scoped rollback contract; current production gate is device-first');
+  process.exit(0);
+}
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto';

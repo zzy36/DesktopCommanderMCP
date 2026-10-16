@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createFleetPluginHttpServer } from '../dist/remote-device/fleet/plugin-server.js';
-import { LCM_PROJECT_TOOLS } from '../dist/remote-device/fleet/project-tool-contract.js';
+import { LCM_REMOTE_TOOL_CATALOG } from '../dist/remote-device/fleet/lcm-remote-tool-catalog.js';
 
 const TOKEN = 'fleet-test-secret';
 const backend = {
@@ -65,12 +65,12 @@ await client.connect(transport);
 const tools = await client.listTools();
 assert.deepEqual(
   tools.tools.map((tool) => tool.name).sort(),
-  ['fleet_status', 'list_devices', 'ping', 'who_am_i', 'get_tool_result', 'list_remote_tool_calls', ...LCM_PROJECT_TOOLS].sort(),
+  ['fleet_status', 'list_devices', 'ping', 'who_am_i', 'get_tool_result', 'list_remote_tool_calls', 'get_usage_stats', ...LCM_REMOTE_TOOL_CATALOG.map((tool) => tool.name)].sort(),
 );
 
 const result = await client.callTool({
   name: 'fleet_status',
-  arguments: { project_id: 'network.ikuai', hostname: 'YUAN' },
+  arguments: { hostname: 'YUAN' },
 });
 assert.equal(result.isError, undefined);
 assert.match(result.content?.[0]?.text ?? '', /"online": true/);

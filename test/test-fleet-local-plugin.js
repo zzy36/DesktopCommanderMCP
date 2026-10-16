@@ -1,3 +1,8 @@
+import { skip } from './helpers/run-if-main.js';
+if (process.env.LCM_RUN_LEGACY_NATIVE_TESTS !== '1') {
+  skip('retired Native/local-plugin presentation; kept only for rollback testing');
+  process.exit(0);
+}
 import assert from 'node:assert/strict';
 import { readFile, rm } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';

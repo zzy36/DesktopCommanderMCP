@@ -60,15 +60,17 @@ try {
   assert.equal(status.devices.length, 1);
   assert.equal(status.devices[0].hostname, 'YUAN');
   assert.equal(status.devices[0].online, false);
-  assert.equal(status.projects[0].projectId, 'network.ikuai');
+  assert.equal('projects' in status, false);
+  assert.equal(typeof status.usage?.in_flight, 'number');
   assert.deepEqual(status.recentCalls, []);
 
   response = await fetch(`${base}/api/bootstrap`);
   assert.equal(response.status, 200);
   const bootstrap = await response.json();
-  assert.match(bootstrap.commands.interactiveRemote, /Start-LCMRemote\.ps1/);
-  assert.match(bootstrap.commands.existingApprovedDevice, /Register-LocalControlMcpDevice\.ps1/);
-  assert.match(bootstrap.note, /不需要账号数据库/);
+  assert.match(bootstrap.commands.provisionOnly, /Install-LCMAgent\.ps1/);
+  assert.match(bootstrap.commands.provisionOnly, /-ProvisionOnly/);
+  assert.match(bootstrap.commands.installAndStart, /-InstallTask/);
+  assert.match(bootstrap.note, /不会授予业务项目权限/);
 
   // Official-style device authorization: start -> browser approve -> poll.
   const verifier = randomBytes(32).toString('base64url');

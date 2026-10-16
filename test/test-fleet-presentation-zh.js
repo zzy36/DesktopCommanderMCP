@@ -22,7 +22,7 @@ for (const tool of before) {
   assert.match(localized.description, /[\u4e00-\u9fff]/);
 }
 assert.deepEqual(LCM_REMOTE_TOOL_CATALOG, before, 'presentation must not mutate upstream catalog');
-const denied = Object.assign(new Error('path escapes authorized project root'), { code: 'PROJECT_DEVICE_DENIED' });
+const denied = Object.assign(new Error('external target policy denied this operation'), { code: 'PROJECT_DEVICE_DENIED' });
 assert.match(localizeLcmError(denied), /未获授权/);
 assert.equal(denied.code, 'PROJECT_DEVICE_DENIED');
 assert.match(localizeLcmError(new Error('invalid local credential')), /密钥不正确/);
@@ -38,8 +38,13 @@ try {
   assert.deepEqual(client.getServerVersion().icons, LCM_ICONS);
   assert.deepEqual(Buffer.from(LCM_ICONS[0].src.split(',')[1], 'base64'), await readFile(new URL('../deploy/chatgpt-local-plugin/local-control-mcp/assets/local-control-mcp.svg', import.meta.url)));
   const listed = await client.listTools();
-  assert.equal(listed.tools.length, 26);
-  assert.equal(new Set(listed.tools.map(x => x.name)).size, 26);
+  assert.equal(listed.tools.length, 31);
+  assert.equal(new Set(listed.tools.map(x => x.name)).size, 31);
+  for (const tool of listed.tools) {
+    assert.equal('project_id' in (tool.inputSchema?.properties ?? {}), false);
+    assert.equal('scope_kind' in (tool.inputSchema?.properties ?? {}), false);
+    assert.equal('machine_approval' in (tool.inputSchema?.properties ?? {}), false);
+  }
   for (const tool of listed.tools) {
     assert.match(tool.description, /[\u4e00-\u9fff]/);
     assert.deepEqual(tool.icons, LCM_ICONS);

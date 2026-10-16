@@ -1,3 +1,8 @@
+import { skip } from './helpers/run-if-main.js';
+if (process.env.LCM_RUN_LEGACY_NATIVE_TESTS !== '1') {
+  skip('retired Native/local-plugin presentation; kept only for rollback testing');
+  process.exit(0);
+}
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import os from 'node:os';

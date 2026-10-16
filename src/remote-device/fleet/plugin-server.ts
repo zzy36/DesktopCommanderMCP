@@ -164,11 +164,10 @@ export function createFleetPluginMcpServer(
             const hostname = requiredString(args, 'hostname');
             const forwarded = { ...args };
             delete forwarded.hostname;
-            // Transitional clients remain usable. These fields are absent from the
-            // new schema and never gate transport reachability.
+            // Public device-first tools never accept legacy governance arguments.
+            // Governance context, when present, is opaque MCP metadata only.
             delete forwarded.project_id; delete forwarded.scope_kind; delete forwarded.machine_approval;
             if (request.params._meta) forwarded._lcm_context = request.params._meta;
-            else if (typeof args.project_id === 'string' && args.project_id.trim()) forwarded._lcm_context = { project_id: args.project_id };
             if (backend.callDeviceTool) return await backend.callDeviceTool(hostname, toolName, forwarded) as any;
             return await backend.callMachineTool(hostname, toolName, forwarded, true) as any;
 

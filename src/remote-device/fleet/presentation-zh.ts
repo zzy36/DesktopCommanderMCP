@@ -134,7 +134,6 @@ export function localizeLcmTool(tool: any): any {
   copy.description = `Local Control MCP：${entry[1]}`;
   copy.annotations = { ...copy.annotations, title: entry[0] };
   const descriptions: Record<string, string> = {
-    project_id: '当前真实 L3 project_id；授权失败时不得替换或跨项目重绑。',
     hostname: '准确的 D0 hostname；不允许跨设备自动回退。',
     execution_context: 'system 用于后台任务；interactive 用于登录用户的 Git 凭据、浏览器或用户环境，要求本设备已有授权用户会话，不降级到 SYSTEM。',
   };
@@ -147,7 +146,7 @@ export function localizeLcmTool(tool: any): any {
 export function localizeLcmError(error: unknown): string {
   const code = (error as any)?.code;
   const labels: Record<string, string> = {
-    PROJECT_DEVICE_DENIED: '项目、设备、路径或任务归属未获授权；请核对真实 project_id 和目标设备，禁止跨项目回退。',
+    PROJECT_DEVICE_DENIED: '目标操作未获授权；请核对准确设备、路径和当前任务权限，不要改换其他设备或项目绕过。',
     POLICY_SKEW: '设备策略版本不一致，请同步受管策略后重试。',
     IDENTITY_MISMATCH: '设备身份校验失败，请从本地管理中心核对登记身份。',
     TARGET_AMBIGUOUS: '目标设备不唯一，请明确指定 hostname。',
