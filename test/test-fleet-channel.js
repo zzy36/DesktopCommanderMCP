@@ -7,6 +7,7 @@ import {
   handshakePayload,
   verifyChallengeSignature,
 } from '../dist/remote-device/fleet/identity.js';
+import { MAX_FLEET_FRAME_BYTES } from '../dist/remote-device/fleet/wire-limits.js';
 import { FleetChannel } from '../dist/remote-device/fleet/fleet-channel.js';
 
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
@@ -14,7 +15,7 @@ const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString(
 const fingerprint = fingerprintPublicKey(publicKeyPem);
 const POLICY = 'control@fleet-channel-test';
 
-const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+const server = new WebSocketServer({ host: '127.0.0.1', port: 0, maxPayload: MAX_FLEET_FRAME_BYTES });
 await once(server, 'listening');
 const address = server.address();
 assert.equal(typeof address, 'object');
@@ -130,6 +131,7 @@ const channel = new FleetChannel({
   authorize: (projectId, hostname) => projectId === 'network.ikuai' && hostname === 'YUAN',
   authorizeMachine: (hostname, explicitAuthorization) => hostname === 'YUAN' && explicitAuthorization === true,
   execute: async (toolName, args, context) => {
+    if (toolName === 'large') return { text: '\u84dd'.repeat(args.characters) };
     if (toolName === 'echo') return { args, generation: context.generation };
     if (toolName === 'wait') {
       await new Promise((resolve, reject) => {
@@ -158,6 +160,24 @@ assert.equal(result.ok, true);
 assert.equal(result.result.args.value, 42);
 assert.equal(result.result.generation, generation);
 const duplicateCallId = call.callId;
+// Real WebSocket: the old 1 MiB boundary must no longer disconnect the session.
+const payloadGeneration = generation;
+call = sendCall({ toolName: 'large', args: { characters: 700000 } });
+result = await call.result;
+assert.equal(result.ok, true);
+assert.equal(Buffer.byteLength(result.result.text), 2100000);
+call = sendCall({ toolName: 'large', args: { characters: Math.ceil(MAX_FLEET_FRAME_BYTES / 3) } });
+result = await call.result;
+assert.equal(result.ok, false);
+assert.equal(result.code, 'RESULT_TOO_LARGE');
+const oversizedCallId = call.callId;
+call = sendCall({ callId: oversizedCallId, args: { value: 'must not execute again' } });
+assert.equal((await call.result).code, 'RESULT_TOO_LARGE');
+call = sendCall({ args: { after: 'oversized' } });
+assert.equal((await call.result).result.args.after, 'oversized');
+assert.equal(generation, payloadGeneration);
+assert.equal(channel.getState().inFlight, 0);
+
 
 call = sendCall({ scopeKind: 'machine_control', projectId: null, machineApproval: false });
 result = await call.result;

@@ -1,3 +1,4 @@
+import { MAX_FLEET_FRAME_BYTES } from './wire-limits.js';
 import { LocalAdminSecurity } from './local-admin-security.js';
 import { mkdir } from 'node:fs/promises';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
@@ -73,7 +74,7 @@ export async function startFleetGatewayService(
             oauthProvider: mcpRuntime.oauthProvider,
         })
         : null;
-    const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+    const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FLEET_FRAME_BYTES });
 
     wss.on('connection', (socket) => {
         try {

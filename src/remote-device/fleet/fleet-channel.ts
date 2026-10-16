@@ -1,5 +1,6 @@
 import { sign } from 'node:crypto';
 import { canonicalHostname, handshakePayload } from './identity.js';
+import { MAX_FLEET_FRAME_BYTES } from './wire-limits.js';
 
 export type FleetScopeKind = 'project' | 'machine_control';
 
@@ -342,6 +343,7 @@ export class FleetChannel {
             this.pendingCalls.delete(callId);
         }
 
+        resultMessage = this.boundResult(resultMessage);
         this.cacheCompletedResult(callId, resultMessage);
         if (this.authenticated && this.generation === generation) this.send(resultMessage);
     }
@@ -362,9 +364,16 @@ export class FleetChannel {
         result?: unknown;
         error?: string;
     }): void {
-        const message: FleetWireMessage = { type: 'result', ...input };
+        const message = this.boundResult({ type: 'result', ...input });
         this.cacheCompletedResult(input.callId, message);
         this.send(message);
+    }
+
+    private boundResult(message: FleetWireMessage): FleetWireMessage {
+        if (Buffer.byteLength(JSON.stringify(message), 'utf8') <= MAX_FLEET_FRAME_BYTES) return message;
+        return { type: 'result', callId: message.callId, generation: message.generation,
+            ok: false, code: 'RESULT_TOO_LARGE',
+            error: `Result exceeds ${MAX_FLEET_FRAME_BYTES} byte Fleet frame limit; read a bounded range or smaller output. The operation may already have executed; do not replay mutations.` };
     }
 
     private cacheCompletedResult(callId: string, message: FleetWireMessage): void {
