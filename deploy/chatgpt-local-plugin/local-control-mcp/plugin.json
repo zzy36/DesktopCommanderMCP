@@ -17,7 +17,7 @@
         "displayName": "Local Control MCP",
         "shortDescription": "自托管、项目隔离的本地与远程设备控制",
         "longDescription": "自托管的文件、终端与远程设备控制。按真实作用域和设备授权；LCM 或其 UI/discovery 阻塞时允许 RDC 修复，恢复后回到 LCM。",
-        "developerName": "Local Control MCP",
+        "developerName": "YUAN",
         "category": "Developer Tools",
         "capabilities": [
           "Read",
@@ -28,5 +28,8 @@
         "logo": "./assets/local-control-mcp.svg"
       }
     }
+  },
+  "author": {
+    "name": "YUAN"
   }
 }

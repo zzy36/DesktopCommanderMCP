@@ -38,9 +38,9 @@
       "hostname": "YUAN"
     }
   ],
-  "callTimeoutMs": 15000,
+  "callTimeoutMs": 60000,
   "maxPendingCalls": 64,
   "callRecordLimit": 1024,
-  "heartbeatTimeoutMs": 45000,
+  "heartbeatTimeoutMs": 90000,
   "heartbeatSweepMs": 5000
 }

@@ -72,8 +72,8 @@ $config=[ordered]@{
     reconnectBaseMs=1000
     reconnectMaxMs=30000
     heartbeatMs=10000
-    heartbeatTimeoutMs=45000
-    callTimeoutMs=15000
+    heartbeatTimeoutMs=90000
+    callTimeoutMs=55000
     maxInFlight=8
     completedResultCacheSize=256
   }
