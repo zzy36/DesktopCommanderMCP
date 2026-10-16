@@ -88,6 +88,8 @@ export class FleetChannel {
     private lastGatewaySeenAt = 0;
     private readonly pendingCalls = new Map<string, PendingCall>();
     private readonly completedResults = new Map<string, FleetWireMessage>();
+    private readonly completedResultSizes = new Map<string, number>();
+    private completedResultBytes = 0;
 
     constructor(options: FleetChannelOptions) {
         this.hostname = canonicalHostname(options.hostname);
@@ -377,10 +379,16 @@ export class FleetChannel {
     }
 
     private cacheCompletedResult(callId: string, message: FleetWireMessage): void {
+        this.completedResultBytes -= this.completedResultSizes.get(callId) ?? 0;
+        const bytes = Buffer.byteLength(JSON.stringify(message), 'utf8');
         this.completedResults.set(callId, message);
-        while (this.completedResults.size > this.options.completedResultCacheSize) {
+        this.completedResultSizes.set(callId, bytes);
+        this.completedResultBytes += bytes;
+        while (this.completedResults.size > this.options.completedResultCacheSize || this.completedResultBytes > 64 * 1024 * 1024) {
             const oldest = this.completedResults.keys().next().value as string | undefined;
             if (!oldest) break;
+            this.completedResultBytes -= this.completedResultSizes.get(oldest) ?? 0;
+            this.completedResultSizes.delete(oldest);
             this.completedResults.delete(oldest);
         }
     }
