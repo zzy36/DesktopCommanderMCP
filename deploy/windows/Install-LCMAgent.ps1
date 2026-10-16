@@ -37,6 +37,7 @@ if(-not(Test-Path -LiteralPath $runtime)){
   if($LASTEXITCODE -ne 0){throw 'Pinned search dependency installation failed'}
   & $node dist/npm-scripts/verify-ripgrep.js | Out-Null
   if($LASTEXITCODE -ne 0){throw 'Search runtime verification failed'}
+  & (Join-Path $PSScriptRoot 'Repair-LCMBundledDependency.ps1') -RuntimeRoot $source[0].FullName -ExpectedHostname $ExpectedHostname | Out-Null
   [IO.File]::WriteAllText((Join-Path $source[0].FullName 'LCM_RELEASE'),$Release,[Text.UTF8Encoding]::new($false))
  }finally{Pop-Location}
  Move-Item -LiteralPath $source[0].FullName -Destination $runtime
