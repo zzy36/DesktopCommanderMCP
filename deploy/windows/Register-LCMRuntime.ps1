@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ControlRoot,[switch]$Json,[switch]$SkipBuild,[string]$SeedRepo,[switch]$RetireLegacyRegistrations)
+param([Parameter(Mandatory)][string]$ControlRoot,[switch]$Json,[switch]$SkipBuild,[string]$SeedRepo,[switch]$RetireLegacyRegistrations,[switch]$RuntimeOnly)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 
@@ -102,6 +102,23 @@ if(-not(Test-Path -LiteralPath (Join-Path $template 'plugin.json'))){throw "Loca
 $config=[ordered]@{schema_version=1;device_name=[string]$device[0].device_name;controlRoot=$controlRoot;runtimeRoot=$runtimeRoot;runtimeCommit=$commit;installedAt=(Get-Date).ToString('o')}
 if(Test-Path -LiteralPath $runtimeConfig){$saved=Join-Path $sharedRoot ('retired\runtime-config-'+(Get-Date -Format 'yyyyMMddHHmmss')+'.json');New-Item -ItemType Directory -Force -Path (Split-Path $saved -Parent)|Out-Null;Copy-Item -LiteralPath $runtimeConfig -Destination $saved}
 [IO.File]::WriteAllText($runtimeConfig,($config|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
+
+if($RuntimeOnly){
+  $runtimeOnlyResult=[ordered]@{
+    device_name=[string]$device[0].device_name
+    control_root=$controlRoot
+    runtime_root=$runtimeRoot
+    runtime_commit=$commit
+    runtime_config=$runtimeConfig
+    plugin_id=('local-control-mcp@'+[string]$spec.marketplace)
+    plugin_version=[string]$spec.plugin_version
+    plugin_touched=$false
+    runtime_only=$true
+    status='PASS'
+  }
+  if($Json){$runtimeOnlyResult|ConvertTo-Json -Depth 8}else{$runtimeOnlyResult.GetEnumerator()|ForEach-Object{Write-Host ("{0}={1}" -f $_.Key,$_.Value)}}
+  return
+}
 
 if(Test-Path -LiteralPath $pluginSource){$savedPlugin=Join-Path $sharedRoot ('retired\market-plugin-'+(Get-Date -Format 'yyyyMMddHHmmss'));New-Item -ItemType Directory -Force -Path (Split-Path $savedPlugin -Parent)|Out-Null;Move-Item -LiteralPath $pluginSource -Destination $savedPlugin}
 Copy-Item -LiteralPath $template -Destination $pluginSource -Recurse -Force

@@ -7,7 +7,8 @@ param(
   [switch]$DeviceFlow,
   [int]$PairingTimeoutSeconds = 600,
   [switch]$InstallTask,
-  [switch]$StartNow
+  [switch]$StartNow,
+  [switch]$RuntimeOnly
 )
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
@@ -25,6 +26,7 @@ $deviceName=[string]$device[0].device_name
 $registerLocal=Join-Path $controlRoot 'tools\Register-LocalControlMcp.ps1'
 $registerArgs=@('-NoProfile','-File',$registerLocal,'-Json')
 if($SeedRepo){$registerArgs+=@('-SeedRepo',$SeedRepo)}
+if($RuntimeOnly){$registerArgs+=@('-RuntimeOnly')}
 $localJson=& pwsh @registerArgs | Out-String
 if($LASTEXITCODE -ne 0){throw "Register-LocalControlMcp.ps1 failed with exit code $LASTEXITCODE"}
 $local=$localJson|ConvertFrom-Json
