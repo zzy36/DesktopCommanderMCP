@@ -26,6 +26,7 @@ let activeSocket = null;
 let heartbeatCount = 0;
 const resultWaiters = new Map();
 const acceptedWaiters = [];
+let largeExecutionCount = 0;
 
 function waitForResult(callId, timeoutMs = 2000) {
   return new Promise((resolve, reject) => {
@@ -131,7 +132,7 @@ const channel = new FleetChannel({
   authorize: (projectId, hostname) => projectId === 'network.ikuai' && hostname === 'YUAN',
   authorizeMachine: (hostname, explicitAuthorization) => hostname === 'YUAN' && explicitAuthorization === true,
   execute: async (toolName, args, context) => {
-    if (toolName === 'large') return { text: '\u84dd'.repeat(args.characters) };
+    if (toolName === 'large') { largeExecutionCount++; return { text: '\u84dd'.repeat(args.characters) }; }
     if (toolName === 'echo') return { args, generation: context.generation };
     if (toolName === 'wait') {
       await new Promise((resolve, reject) => {
@@ -214,6 +215,20 @@ assert.equal(result.code, 'CALL_CANCELED_OR_TIMED_OUT');
 
 await new Promise((resolve) => setTimeout(resolve, 80));
 assert(heartbeatCount > 0, 'expected application heartbeat traffic');
+
+// The byte budget must evict large cached results before the count limit.
+call = sendCall({ toolName: 'large', args: { characters: 2800000 } });
+const evictedLargeId = call.callId;
+assert.equal((await call.result).ok, true);
+for (let i = 0; i < 8; i++) {
+  call = sendCall({ toolName: 'large', args: { characters: 2800000 } });
+  assert.equal((await call.result).ok, true);
+}
+const beforeEvictedReplay = largeExecutionCount;
+call = sendCall({ callId: evictedLargeId, toolName: 'large', args: { characters: 1 } });
+assert.equal((await call.result).result.text.length, 1);
+assert.equal(largeExecutionCount, beforeEvictedReplay + 1);
+assert.equal(channel.getState().generation, payloadGeneration);
 
 const beforeReconnectGeneration = generation;
 const nextAccepted = waitForAccepted();
