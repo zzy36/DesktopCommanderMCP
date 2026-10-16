@@ -73,7 +73,7 @@ if($InstallTask){
  $bridgeRunner="`$ErrorActionPreference='Stop'`n`$env:LCM_RELEASE='"+$Release+"'`n& "+(& $quote $node)+" "+(& $quote (Join-Path $runtime 'dist/remote-device/fleet/user-bridge-main.js'))+" --config "+(& $quote (Join-Path $network 'agent.json'))+"`nexit `$LASTEXITCODE`n"
  [IO.File]::WriteAllText((Join-Path $network 'run-agent.ps1'),$agentRunner,[Text.UTF8Encoding]::new($false))
  [IO.File]::WriteAllText((Join-Path $bridge 'run-user-bridge.ps1'),$bridgeRunner,[Text.UTF8Encoding]::new($false))
- $settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Seconds 15) -ExecutionTimeLimit ([TimeSpan]::Zero)
+ $settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
  $agentAction=New-ScheduledTaskAction -Execute $pwsh -Argument ('-NoProfile -File "'+(Join-Path $network 'run-agent.ps1')+'"')
  $bridgeAction=New-ScheduledTaskAction -Execute $pwsh -Argument ('-NoProfile -File "'+(Join-Path $bridge 'run-user-bridge.ps1')+'"')
  Register-ScheduledTask -TaskName $agentTask -Action $agentAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $settings -Principal (New-ScheduledTaskPrincipal -UserId SYSTEM -LogonType ServiceAccount -RunLevel Highest)|Out-Null
