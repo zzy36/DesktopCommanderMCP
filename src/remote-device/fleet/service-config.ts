@@ -27,6 +27,8 @@ const AgentConfigSchema = z.object({
     policyWatchMs: PositiveInt.optional(),
     interactiveStateDir: z.string().min(1).optional(),
     channel: AgentChannelSchema.optional(),
+    deviceFirst: z.boolean().default(true),
+    executionPolicy: z.object({ command: z.string().min(1), args: z.array(z.string()), timeoutMs: PositiveInt.optional() }).strict().optional(),
 }).strict();
 
 const DeviceBindingSchema = z.object({
@@ -78,8 +80,8 @@ const GatewayConfigSchema = z.object({
     }).strict(),
     admin: GatewayAdminSchema.optional(),
     stateDir: z.string().min(1),
-    devices: z.array(DeviceBindingSchema).min(1),
-    projects: z.array(ProjectBindingSchema).min(1),
+    devices: z.array(DeviceBindingSchema).default([]),
+    projects: z.array(ProjectBindingSchema).default([]),
     probes: z.array(ProbeBindingSchema).default([]),
     callTimeoutMs: PositiveInt.optional(),
     maxPendingCalls: PositiveInt.optional(),
@@ -97,6 +99,8 @@ export interface ResolvedAgentServiceConfig {
     policyWatchMs?: number;
     interactiveStateDir?: string;
     channel?: z.infer<typeof AgentChannelSchema>;
+    deviceFirst?: boolean;
+    executionPolicy?: { command: string; args: string[]; timeoutMs?: number };
 }
 
 export type ResolvedGatewayAuth =
@@ -137,7 +141,7 @@ export async function loadAgentServiceConfig(
     if (gatewayUrl.protocol === 'ws:' && !isLoopbackHostname(gatewayUrl.hostname) && env.FLEET_DANGEROUS_ALLOW_INSECURE_WS !== '1') {
         throw new Error('non-loopback Fleet Agent connections must use wss://');
     }
-    const controlRoot = await discoverControlRoot(raw.controlRoot, env);
+    const controlRoot = raw.deviceFirst ? (raw.controlRoot ?? '') : await discoverControlRoot(raw.controlRoot, env);
     const stateDir = path.resolve(
         raw.stateDir
         ?? env.FLEET_STATE_DIR
@@ -157,6 +161,8 @@ export async function loadAgentServiceConfig(
         policyWatchMs: raw.policyWatchMs,
         interactiveStateDir: raw.interactiveStateDir,
         channel: raw.channel,
+        deviceFirst: raw.deviceFirst,
+        executionPolicy: raw.executionPolicy,
     };
 }
 

@@ -10,7 +10,7 @@ import { LCM_ICONS, LCM_BRAND_TITLE } from './branding.js';
 export interface FleetPluginDeviceView {
     hostname: string;
     online: boolean;
-    policyRevision?: string;
+    policyRevision?: string | null;
 }
 
 export interface FleetPluginBackend {
@@ -22,6 +22,8 @@ export interface FleetPluginBackend {
     whoAmI(): Promise<Record<string, unknown>>;
     getToolResult(projectId: string, hostname: string, callId: string): Promise<Record<string, unknown>>;
     listRemoteToolCalls(projectId: string, hostname: string | undefined, limit: number): Promise<Record<string, unknown>[]>;
+    callDeviceTool?(hostname: string, toolName: string, args: Record<string, unknown>): Promise<unknown>;
+    usageStats?(): Promise<Record<string, unknown>>;
     readTestFile?(projectId: string, hostname: string): Promise<string>;
     writeTestFile?(projectId: string, hostname: string, content: string): Promise<{ bytesWritten: number }>;
 }
@@ -34,88 +36,19 @@ export interface FleetPluginHttpOptions {
     bearerToken?: string;
 }
 
+const control = (name: string, description: string, properties: any, required: string[] = []) => ({
+    name, description, inputSchema: { type: 'object', properties, required, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+});
+const host = { type: 'string', minLength: 1, description: 'Exact enrolled hostname; never redirects to another device.' };
 const FLEET_CONTROL_TOOLS: any[] = [
-    {
-        name: 'fleet_status',
-        title: 'Fleet Status',
-        description: 'Check the exact authorized Fleet target for an L3 project. Never falls back to another host.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                project_id: { type: 'string', minLength: 1 },
-                hostname: { type: 'string', minLength: 1 },
-            },
-            required: ['project_id', 'hostname'],
-            additionalProperties: false,
-        },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    },
-    {
-        name: 'list_devices',
-        title: 'List Fleet Devices',
-        description: 'List devices visible to the exact L3 project without exposing private keys or runtime account identifiers.',
-        inputSchema: {
-            type: 'object',
-            properties: { project_id: { type: 'string', minLength: 1 } },
-            required: ['project_id'],
-            additionalProperties: false,
-        },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    },
-    {
-        name: 'ping',
-        title: 'Ping Fleet Device',
-        description: 'Verify that the exact authorized LCM Fleet device is currently online.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                project_id: { type: 'string', minLength: 1 },
-                hostname: { type: 'string', minLength: 1 },
-            },
-            required: ['project_id', 'hostname'],
-            additionalProperties: false,
-        },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    },
-    {
-        name: 'who_am_i',
-        title: 'LCM Identity',
-        description: 'Report the self-hosted LCM control-plane identity. Hosted RDC account/quota semantics are intentionally not used.',
-        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    },
-    {
-        name: 'get_tool_result',
-        title: 'Get Remote Tool Result',
-        description: 'Get one Fleet remote call record only when it belongs to the exact authorized project and device.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                project_id: { type: 'string', minLength: 1 },
-                hostname: { type: 'string', minLength: 1 },
-                call_id: { type: 'string', minLength: 1 },
-            },
-            required: ['project_id', 'hostname', 'call_id'],
-            additionalProperties: false,
-        },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    },
-    {
-        name: 'list_remote_tool_calls',
-        title: 'List Remote Tool Calls',
-        description: 'List recent Fleet calls scoped to one L3 project and optionally one exact host.',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                project_id: { type: 'string', minLength: 1 },
-                hostname: { type: 'string', minLength: 1 },
-                limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
-            },
-            required: ['project_id'],
-            additionalProperties: false,
-        },
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    },
+    control('fleet_status', 'Status of an exact Owner-enrolled device.', { hostname: host }, ['hostname']),
+    control('list_devices', 'List all Owner-enrolled devices, online/offline, last seen, runtime and fingerprint.', {}),
+    control('ping', 'Perform a real round-trip to the exact enrolled Agent.', { hostname: host }, ['hostname']),
+    control('who_am_i', 'Report the private LCM product identity.', {}),
+    control('get_tool_result', 'Read an Owner-scoped asynchronous call by call_id; optionally assert exact device.', { hostname: host, call_id: { type: 'string', minLength: 1 } }, ['call_id']),
+    control('list_remote_tool_calls', 'Owner-scoped recent calls, optionally filtered to one device.', { hostname: host, limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 } }),
+    control('get_usage_stats', 'Local Gateway lifetime counters, health, latency, timeout, bytes and in-flight. No hosted billing.', {}),
 ];
 
 const REMOTE_BY_NAME = new Map(LCM_REMOTE_TOOL_CATALOG.map((tool) => [tool.name, tool]));
@@ -157,7 +90,7 @@ function requireScope(extra: { authInfo?: { scopes?: string[] } }, scope: string
 
 function requiredString(args: Record<string, unknown>, key: string): string {
     const value = typeof args[key] === 'string' ? args[key].trim() : '';
-    if (!value) throw Object.assign(new Error(`${key} is required`), { code: 'PROJECT_DEVICE_DENIED' });
+    if (!value) throw Object.assign(new Error(`${key} is required`), { code: 'INVALID_ARGUMENT' });
     return value;
 }
 
@@ -174,7 +107,7 @@ export function createFleetPluginMcpServer(
     const enforceScopes = options.enforceOAuthScopes === true;
     const server = new McpProtocolServer(
         { name: 'local-control-mcp-remote', title: LCM_BRAND_TITLE, icons: LCM_ICONS, version: '0.3.5' },
-        { capabilities: { tools: {} }, instructions: 'Local Control MCP 远程通道：项目作用域默认使用准确 project_id + hostname；仅当用户对当前任务明确授权 machine_control 时，才可省略 project_id，并必须提供 machine_approval=true + 准确 hostname。两种作用域都由目标设备 .control 重新授权；不得因失败自动换项目、分区或设备。' },
+        { capabilities: { tools: {} }, instructions: 'Local Control MCP is an Owner-scoped device transport. list_devices needs no project. Select the exact enrolled hostname for execution; never redirect an offline device. Target governance is external. Use interactive for logged-in user tools; never downgrade to SYSTEM. Do not replay uncertain writes.' },
     );
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -188,18 +121,18 @@ export function createFleetPluginMcpServer(
         try {
             if (toolName === 'fleet_status') {
                 requireScope(extra, 'fleet:read', enforceScopes);
-                const projectId = requiredString(args, 'project_id');
+                const projectId = '';
                 const hostname = requiredString(args, 'hostname');
                 return jsonResult(await backend.fleetStatus(projectId, hostname));
             }
             if (toolName === 'list_devices') {
                 requireScope(extra, 'fleet:read', enforceScopes);
-                const projectId = requiredString(args, 'project_id');
-                return jsonResult({ project_id: projectId, devices: await backend.listDevices(projectId) });
+                const projectId = '';
+                return jsonResult({ devices: await backend.listDevices(projectId) });
             }
             if (toolName === 'ping') {
                 requireScope(extra, 'fleet:read', enforceScopes);
-                return jsonResult(await backend.ping(requiredString(args, 'project_id'), requiredString(args, 'hostname')));
+                return jsonResult(await backend.ping('', requiredString(args, 'hostname')));
             }
             if (toolName === 'who_am_i') {
                 requireScope(extra, 'fleet:read', enforceScopes);
@@ -208,37 +141,37 @@ export function createFleetPluginMcpServer(
             if (toolName === 'get_tool_result') {
                 requireScope(extra, 'fleet:read', enforceScopes);
                 return jsonResult(await backend.getToolResult(
-                    requiredString(args, 'project_id'),
-                    requiredString(args, 'hostname'),
+                    '',
+                    typeof args.hostname === 'string' ? args.hostname : '',
                     requiredString(args, 'call_id'),
                 ));
             }
             if (toolName === 'list_remote_tool_calls') {
                 requireScope(extra, 'fleet:read', enforceScopes);
-                const projectId = requiredString(args, 'project_id');
+                const projectId = '';
                 const hostname = typeof args.hostname === 'string' && args.hostname.trim() ? args.hostname.trim() : undefined;
                 const limit = typeof args.limit === 'number' && Number.isInteger(args.limit) ? args.limit : 20;
-                return jsonResult({ project_id: projectId, calls: await backend.listRemoteToolCalls(projectId, hostname, limit) });
+                return jsonResult({ calls: await backend.listRemoteToolCalls(projectId, hostname, limit) });
             }
 
+            if (toolName === 'get_usage_stats') {
+                requireScope(extra, 'fleet:read', enforceScopes);
+                return jsonResult(await backend.usageStats?.() ?? {});
+            }
             const definition = REMOTE_BY_NAME.get(toolName);
-            if (!definition) return toolError(Object.assign(new Error(`tool is not exposed by Local Control MCP: ${toolName}`), { code: 'PROJECT_DEVICE_DENIED' }));
+            if (!definition) return toolError(Object.assign(new Error(`Unknown LCM tool: ${toolName}`), { code: 'INVALID_TOOL' }));
             requireScope(extra, definition.annotations?.readOnlyHint === true ? 'fleet:read' : 'fleet:write', enforceScopes);
-            const scopeKind = args.scope_kind === 'machine_control' ? 'machine_control' : 'project';
             const hostname = requiredString(args, 'hostname');
             const forwarded = { ...args };
-            delete forwarded.project_id;
             delete forwarded.hostname;
-            delete forwarded.scope_kind;
-            delete forwarded.machine_approval;
-            if (scopeKind === 'machine_control') {
-                const projectValue = typeof args.project_id === 'string' ? args.project_id.trim() : '';
-                if (projectValue) throw Object.assign(new Error('machine_control scope must not borrow a project_id'), { code: 'PROJECT_DEVICE_DENIED' });
-                if (args.machine_approval !== true) throw Object.assign(new Error('machine_control scope requires machine_approval=true from explicit current-task user authorization'), { code: 'PROJECT_DEVICE_DENIED' });
-                return await backend.callMachineTool(hostname, toolName, forwarded, args.machine_approval === true) as any;
-            }
-            const projectId = requiredString(args, 'project_id');
-            return await backend.callProjectTool(projectId, hostname, toolName, forwarded) as any;
+            // Transitional clients remain usable. These fields are absent from the
+            // new schema and never gate transport reachability.
+            delete forwarded.project_id; delete forwarded.scope_kind; delete forwarded.machine_approval;
+            if (request.params._meta) forwarded._lcm_context = request.params._meta;
+            else if (typeof args.project_id === 'string' && args.project_id.trim()) forwarded._lcm_context = { project_id: args.project_id };
+            if (backend.callDeviceTool) return await backend.callDeviceTool(hostname, toolName, forwarded) as any;
+            return await backend.callMachineTool(hostname, toolName, forwarded, true) as any;
+
         } catch (error) {
             return toolError(error);
         }

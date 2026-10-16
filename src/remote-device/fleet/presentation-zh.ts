@@ -1,33 +1,129 @@
 // LCM-owned presentation only. Protocol names, schemas, codes and authorization stay stable.
 const tools: Record<string, [string, string]> = {
-  get_config: ['查看项目配置', '查看当前授权项目的配置摘要；不提供任意全局配置修改。'],
-  read_file: ['读取文件', '读取授权项目内文件，支持文本、PDF、图片、表格和 DOCX。offset 从 0 开始，负数读取末尾；length 限制行数。使用绝对路径；URL 模式禁用，路径不得越出项目根。'],
-  read_multiple_files: ['批量读取文件', '读取授权项目内多个文件；每项附带路径，单个文件失败不会中止其他读取。'],
-  write_file: ['写入文件', '在授权项目内写入文件。mode 为 rewrite 时覆盖，为 append 时追加；修改前核对已有内容。'],
-  write_pdf: ['生成 PDF', '在授权项目内根据内容生成或更新 PDF 文件；先核对目标路径和已有内容。'],
-  edit_block: ['替换文件内容', '在授权项目文件中精确替换 old_string 为 new_string；expected_replacements 指定预期匹配次数。先读取原文，避免覆盖无关修改。'],
-  create_directory: ['创建目录', '在授权项目内创建目录；路径不得越出项目根。'],
-  list_directory: ['查看目录', '列出授权项目内目录内容；depth 控制递归深度。'],
-  move_file: ['移动或重命名文件', '在授权项目内移动或重命名文件或目录；源路径和目标路径均需通过项目授权。'],
-  get_file_info: ['查看文件信息', '查看授权项目内文件或目录的大小、类型和时间等信息。'],
-  start_search: ['开始搜索', '在授权项目内搜索文件名或内容。返回搜索 sessionId，后续通过 get_more_search_results 读取；无需结果时使用 stop_search。'],
-  get_more_search_results: ['读取更多搜索结果', '读取本项目当前运行时创建的搜索 sessionId 的更多结果；offset、length 控制分页。'],
-  stop_search: ['停止搜索', '停止本项目当前运行时拥有的搜索 sessionId；不得操作其他项目的搜索。'],
-  list_searches: ['查看搜索任务', '列出本项目当前运行时拥有的搜索任务。'],
-  start_process: ['运行命令', '在授权项目根目录启动 PowerShell 7 命令或交互进程。返回 PID；运行中使用 read_process_output 读取，使用 interact_with_process 输入。需要登录用户的 Git 凭据、浏览器或用户环境时，远程调用必须选择 execution_context: interactive；不可降级到 SYSTEM 或 RDC。长任务只启动一次，保留 PID 后轮询。'],
-  read_process_output: ['读取进程输出', '读取本项目拥有的 PID 输出。offset 为 0 时读取新增输出，负数读取末尾；timeout_ms 限制等待时间。进程仍运行时继续轮询，不重复启动原命令。'],
-  interact_with_process: ['向进程输入', '向本项目拥有的 PID 发送 input，并读取新输出；适用于终端和交互解释器。后续调用保持原 execution_context。'],
-  force_terminate: ['强制结束终端任务', '强制结束本项目当前运行时拥有的终端 PID；先核对目标，保留需要的输出。'],
-  list_sessions: ['查看终端任务', '列出本项目当前运行时拥有的终端任务、PID、运行时间和等待输入状态。'],
-  kill_process: ['结束进程', '结束本项目当前运行时拥有的 PID；不得用来关闭无关应用或其他项目进程。'],
-  // Reserved for upstream catalog variants; not added to the exposed contract.
-  list_processes: ['查看进程', '查看授权范围内进程。'],
-  fleet_status: ['查看设备状态', '查看指定 project_id 和 hostname 的授权、在线和策略状态；不会改路由到另一台设备。'],
-  list_devices: ['查看可用设备', '列出指定 project_id 已授权的设备；不泄露私钥或托管账号标识。'],
-  ping: ['检查设备连接', '检查指定 project_id 和 hostname 的设备当前是否在线。'],
-  who_am_i: ['查看服务身份', '查看 Local Control MCP 自托管服务身份；不模拟 RDC 的托管账号或额度。'],
-  get_tool_result: ['读取远程调用结果', '读取 call_id 对应的远程结果；必须属于指定 project_id 和 hostname。运行中的调用只轮询，不重复提交。'],
-  list_remote_tool_calls: ['查看最近远程调用', '列出指定 project_id 的最近调用，可进一步限定 hostname；limit 为 1 到 50。'],
+  "get_config": [
+    "查看设备配置",
+    "读取准确设备的本地执行器配置。"
+  ],
+  "set_config_value": [
+    "修改设备配置",
+    "修改本地执行器配置项；由目标设备外部治理判断权限。"
+  ],
+  "read_file": [
+    "读取文件",
+    "按绝对路径读取目标设备文件。"
+  ],
+  "read_multiple_files": [
+    "批量读取文件",
+    "读取目标设备多个文件。"
+  ],
+  "write_file": [
+    "写入文件",
+    "写入或追加目标文件；先核对内容与目标设备。"
+  ],
+  "write_pdf": [
+    "生成 PDF",
+    "在目标设备生成或更新 PDF。"
+  ],
+  "create_directory": [
+    "创建目录",
+    "在目标设备创建目录。"
+  ],
+  "list_directory": [
+    "查看目录",
+    "列出目标设备目录内容。"
+  ],
+  "move_file": [
+    "移动文件",
+    "移动或重命名目标设备文件；先核对源与目标。"
+  ],
+  "get_file_info": [
+    "查看文件信息",
+    "读取目标设备文件或目录属性。"
+  ],
+  "edit_block": [
+    "替换文件内容",
+    "在目标文件精确替换指定内容。"
+  ],
+  "start_search": [
+    "开始搜索",
+    "搜索目标设备文件名或内容，返回 sessionId。"
+  ],
+  "get_more_search_results": [
+    "读取更多搜索结果",
+    "按 sessionId 分页读取本设备搜索结果。"
+  ],
+  "stop_search": [
+    "停止搜索",
+    "停止目标设备指定搜索任务。"
+  ],
+  "list_searches": [
+    "查看搜索任务",
+    "列出目标设备当前执行器的搜索任务。"
+  ],
+  "start_process": [
+    "运行命令",
+    "在准确设备执行命令，默认登录用户。后台操作可显式选择 system；不自动降级。长任务只启动一次，保留 PID 后轮询。"
+  ],
+  "read_process_output": [
+    "读取进程输出",
+    "读取目标设备指定 PID 的输出；保持原执行上下文。"
+  ],
+  "interact_with_process": [
+    "向进程输入",
+    "向指定 PID 输入并读取新输出；保持原执行上下文。"
+  ],
+  "force_terminate": [
+    "结束终端任务",
+    "停止指定终端任务；先确认 PID。"
+  ],
+  "list_sessions": [
+    "查看终端任务",
+    "列出目标设备当前执行器终端任务。"
+  ],
+  "kill_process": [
+    "结束进程",
+    "结束准确设备的指定 PID；操作前核对授权和进程用途。"
+  ],
+  "list_processes": [
+    "查看运行进程",
+    "列出准确设备进程、PID、CPU 和内存。"
+  ],
+  "shutdown": [
+    "停止 LCM Agent",
+    "仅停止远程 LCM Agent，不关闭 Windows。重新启动 Agent 任务可恢复。"
+  ],
+  "fleet_status": [
+    "查看设备状态",
+    "查看准确已登记设备在线状态、版本及最近连接。"
+  ],
+  "list_devices": [
+    "查看所有设备",
+    "列出此 Owner 的全部已登记设备；不要求项目身份。"
+  ],
+  "ping": [
+    "检查设备连接",
+    "与准确已登记 Agent 实际往返，返回延迟与运行状态。"
+  ],
+  "who_am_i": [
+    "查看服务身份",
+    "查看私人自托管 Local Control MCP 服务身份。"
+  ],
+  "get_tool_result": [
+    "读取远程调用结果",
+    "按 call_id 读取 Owner 范围内的调用状态或结果。不要重复提交结果不明确的写操作。"
+  ],
+  "list_remote_tool_calls": [
+    "查看最近远程调用",
+    "读取 Owner 范围内最近调用，可按准确设备过滤。"
+  ],
+  "get_recent_tool_calls": [
+    "查看本机调用历史",
+    "读取目标设备本地执行器调用历史。"
+  ],
+  "get_usage_stats": [
+    "查看运行统计",
+    "读取本地 Gateway 调用、结果、延迟、超时、字节和运行统计，不涉及托管额度。"
+  ]
 };
 
 export function localizeLcmTool(tool: any): any {

@@ -960,11 +960,19 @@ export const LCM_REMOTE_TOOL_CATALOG: any[] = [
   }
 ];
 
-// Execution identity is explicit and independent of D0/project authorization.
+// Owner-scoped device primitives. Governance context is opaque MCP _meta, not tool arguments.
 for (const tool of LCM_REMOTE_TOOL_CATALOG) {
-  tool.inputSchema.properties.project_id.description = 'Exact target L3 project_id for project scope. Omit for explicit machine_control scope.';
-  tool.inputSchema.properties.scope_kind = { type: 'string', enum: ['project', 'machine_control'], default: 'project', description: 'Project scope is default. machine_control is only for an explicitly user-authorized current-task machine/control operation on the exact D0.' };
-  tool.inputSchema.properties.machine_approval = { type: 'boolean', default: false, description: 'Must be true for machine_control scope and must come from explicit current-task user authorization.' };
-  tool.inputSchema.properties.execution_context = { type: 'string', enum: ['system', 'interactive'], description: 'Use interactive for Git credentials, browser/GUI, or logged-in user profile. Requires an authorized logged-in user on this exact D0; never falls back to SYSTEM.' };
+  delete tool.inputSchema.properties.project_id;
+  tool.inputSchema.properties.execution_context = { type: 'string', enum: ['system', 'interactive'], default: 'interactive', description: 'Use the logged-in user by default. Explicit SYSTEM is for background work; no silent downgrade.' };
   tool.inputSchema.required = (tool.inputSchema.required ?? []).filter((name: string) => name !== 'project_id');
 }
+const deviceTool = (name: string, description: string, properties: any, required: string[], readOnly: boolean) => ({
+  name, description, inputSchema: { type: 'object', properties: { hostname: { type: 'string', minLength: 1 }, execution_context: { type: 'string', enum: ['interactive', 'system'], default: 'interactive' }, ...properties }, required: ['hostname', ...required], additionalProperties: false },
+  annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, openWorldHint: !readOnly },
+});
+LCM_REMOTE_TOOL_CATALOG.push(
+  deviceTool('list_processes', 'List running processes on the exact enrolled device, including PID/CPU/memory.', {}, [], true),
+  deviceTool('set_config_value', 'Set a local executor configuration value. External device governance decides permission.', { key: { type: 'string' }, value: { anyOf: [{type:'string'},{type:'number'},{type:'boolean'},{type:'array',items:{type:'string'}},{type:'null'}] } }, ['key','value'], false),
+  deviceTool('shutdown', 'Stop only the remote LCM Agent. Does not shut down Windows. Restart its scheduled task to reconnect.', {}, [], false),
+  deviceTool('get_recent_tool_calls', 'Read device-local executor audit/history.', { maxResults: { type: 'integer', minimum: 1, maximum: 1000 }, toolName: { type: 'string' }, since: { type: 'string' } }, [], true),
+);

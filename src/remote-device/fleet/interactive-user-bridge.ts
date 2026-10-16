@@ -10,6 +10,7 @@ import { DesktopCommanderIntegration } from '../desktop-commander-integration.js
 import { ControlAuthorization, ControlPolicyAuthorizer, ControlProjectAuthorization } from './control-policy.js';
 import { canonicalHostname } from './identity.js';
 import { ProjectResourceScope, scopeMachineToolArgs, scopeProjectToolArgs, validateProjectToolPaths } from './project-tool-contract.js';
+import { DeviceExecutor, ExecutionPolicyCommand } from './device-executor.js';
 
 const MAX_REQUEST = 1024 * 1024;
 const MAX_RESPONSE = 16 * 1024 * 1024;
@@ -22,7 +23,7 @@ function authentic(secret: string, body: string, signature: unknown): boolean {
     return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 interface Manifest { schemaVersion: 1; pipe: string; secret: string; hostname: string; pid: number; updatedAt: number; username: string; sessionId: number; }
-interface Request { id: string; timestamp: number; scopeKind?: 'project' | 'machine_control'; projectId: string | null; machineApproval?: boolean; hostname: string; toolName: string; args: Record<string, unknown>; }
+interface Request { id: string; timestamp: number; scopeKind?: 'project' | 'machine_control' | 'device'; projectId: string | null; machineApproval?: boolean; hostname: string; toolName: string; args: Record<string, unknown>; }
 interface Engine {
     initialize(): Promise<void>;
     shutdown(): Promise<void>;
@@ -37,6 +38,7 @@ interface Authorizer {
 export interface InteractiveUserBridgeOptions {
     controlRoot: string; stateDir: string;
     desktop?: Engine; authorizer?: Authorizer;
+    deviceFirst?: boolean; executionPolicy?: ExecutionPolicyCommand;
     // Unix socket override is only for the cross-platform test fixture. Windows always uses a named pipe.
     testSocket?: string;
 }
@@ -53,7 +55,7 @@ export async function startInteractiveUserBridge(options: InteractiveUserBridgeO
     const pipe = options.testSocket ?? `\\\\.\\pipe\\lcm-user-${hostname}-${randomBytes(16).toString('hex')}`;
     if (process.platform !== 'win32' && !options.testSocket) throw error('interactive user bridge is Windows-only');
     const desktop = options.desktop ?? new DesktopCommanderIntegration();
-    const authorizer = options.authorizer ?? new ControlPolicyAuthorizer({ controlRoot: options.controlRoot });
+    const authorizer = options.deviceFirst ? { warmup: async () => {}, stop: async () => {}, authorize: async () => { throw error('Legacy governance transport is retired'); }, authorizeMachine: async () => { throw error('Legacy governance transport is retired'); } } : options.authorizer ?? new ControlPolicyAuthorizer({ controlRoot: options.controlRoot });
     await authorizer.warmup();
     try { await desktop.initialize(); } catch (cause) { await authorizer.stop(); throw cause; }
     const manifest: Manifest = { schemaVersion: 1, pipe, secret: randomBytes(32).toString('base64url'), hostname, pid: process.pid, updatedAt: Date.now(), username: os.userInfo().username, sessionId };
@@ -64,6 +66,7 @@ export async function startInteractiveUserBridge(options: InteractiveUserBridgeO
         await writeFile(temp, JSON.stringify(manifest), { mode: 0o600 }); await rename(temp, manifestPath);
     };
     const resources = new ProjectResourceScope();
+    const deviceExecutor = new DeviceExecutor(desktop, hostname, options.executionPolicy);
     const used = new Map<string, number>();
     const sockets = new Set<Socket>();
     const server = createServer(socket => {
@@ -90,6 +93,14 @@ export async function startInteractiveUserBridge(options: InteractiveUserBridgeO
                     if (used.has(request.id) || used.size >= 1000) throw error('interactive request replay denied', 'PROJECT_DEVICE_DENIED');
                     used.set(request.id, Date.now());
                     if (canonicalHostname(request.hostname) !== hostname) throw error('interactive target does not match this device', 'PROJECT_DEVICE_DENIED');
+                    if (request.scopeKind === 'device') {
+                        if (!options.deviceFirst) throw error('Device execution is not enabled');
+                        const result = await deviceExecutor.execute(request.toolName, request.args, controller.signal);
+                        const body = JSON.stringify({ id: requestId, ok: true, result, executionContext: 'interactive' });
+                        if (Buffer.byteLength(body) > MAX_RESPONSE) throw error('interactive result exceeds size limit');
+                        socket.end(JSON.stringify({ body, signature: sign(manifest.secret, body) }) + '\n');
+                        return;
+                    }
                     const scopeKind = request.scopeKind === 'machine_control' ? 'machine_control' : 'project';
                     if (scopeKind === 'project' && (!request.projectId || typeof request.projectId !== 'string')) throw error('project scope requires exact project_id', 'PROJECT_DEVICE_DENIED');
                     if (scopeKind === 'machine_control' && request.projectId) throw error('machine_control scope must not borrow a project_id', 'PROJECT_DEVICE_DENIED');
@@ -143,7 +154,7 @@ export class InteractiveUserClient {
     constructor(private readonly stateDir: string) {}
     async callTool(
         toolName: string, args: Record<string, unknown>, projectId: string | null, hostname: string, signal?: AbortSignal,
-        scopeKind: 'project' | 'machine_control' = 'project', machineApproval = false,
+        scopeKind: 'project' | 'machine_control' | 'device' = 'project', machineApproval = false,
     ): Promise<any> {
         let manifest: Manifest;
         try { manifest = JSON.parse(await readFile(path.join(this.stateDir, 'bridge.json'), 'utf8')); }

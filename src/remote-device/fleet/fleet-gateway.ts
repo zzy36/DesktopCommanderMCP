@@ -21,7 +21,7 @@ export interface FleetGatewaySocket {
 
 export interface FleetGatewayOptions {
     devices: DeviceBinding[];
-    projects: ProjectBinding[];
+    projects?: ProjectBinding[];
     generationStore?: FleetGenerationStore;
     audit?: FleetAuditSink;
     callTimeoutMs?: number;
@@ -46,7 +46,7 @@ export type FleetGatewayCallStatus = 'pending' | 'completed' | 'failed' | 'timeo
 
 export interface FleetGatewayCallRecord {
     callId: string;
-    scopeKind: 'project' | 'machine_control';
+    scopeKind: 'project' | 'machine_control' | 'device';
     projectId: string | null;
     hostname: string;
     toolName: string;
@@ -80,7 +80,7 @@ type PendingCall = {
     callId: string;
     sessionId: string;
     generation: number;
-    scopeKind: 'project' | 'machine_control';
+    scopeKind: 'project' | 'machine_control' | 'device';
     projectId: string | null;
     hostname: string;
     toolName: string;
@@ -107,8 +107,6 @@ export class FleetGatewayError extends Error {
 export class FleetGateway {
     private readonly router: FleetRouter;
     private readonly devices = new Map<string, DeviceBinding>();
-    private readonly projects = new Map<string, ProjectBinding>();
-    private readonly expectedPolicyByHost = new Map<string, string>();
     private readonly generationStore: FleetGenerationStore;
     private readonly audit: FleetAuditSink;
     private readonly callTimeoutMs: number;
@@ -123,38 +121,21 @@ export class FleetGateway {
     private readonly callRecords = new Map<string, FleetGatewayCallRecord>();
     private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     private stopped = false;
+    private readonly startedAtMs = Date.now();
+    private readonly counters = { calls: 0, completed: 0, failed: 0, timeout: 0, canceled: 0, latencyTotalMs: 0, sentBytes: 0, receivedBytes: 0, connections: 0 };
+    usageStats(): Record<string, unknown> { return { ...this.counters, uptime_ms: Date.now() - this.startedAtMs, in_flight: this.pendingCalls.size, online: this.listKnownDeviceStatuses().filter(d => d.online).length, average_call_latency_ms: (this.counters.completed + this.counters.failed + this.counters.timeout) ? this.counters.latencyTotalMs / (this.counters.completed + this.counters.failed + this.counters.timeout) : 0, counter_scope: 'gateway process lifetime' }; }
 
     constructor(options: FleetGatewayOptions) {
-        if (options.devices.length === 0) throw new Error('FleetGateway requires at least one device binding');
-        if (options.projects.length === 0) throw new Error('FleetGateway requires at least one project binding');
 
         const devices = options.devices.map((device) => ({
             ...device,
             hostname: canonicalHostname(device.hostname),
         }));
-        const projects = options.projects.map((project) => ({
-            ...project,
-            hostname: canonicalHostname(project.hostname),
-        }));
-
         for (const device of devices) {
             if (this.devices.has(device.hostname)) throw new Error(`duplicate device binding for ${device.hostname}`);
             this.devices.set(device.hostname, device);
         }
-        for (const project of projects) {
-            if (this.projects.has(project.projectId)) throw new Error(`duplicate project binding for ${project.projectId}`);
-            if (!this.devices.has(project.hostname)) {
-                throw new Error(`project ${project.projectId} references unknown device ${project.hostname}`);
-            }
-            const expected = this.expectedPolicyByHost.get(project.hostname);
-            if (expected && expected !== project.policyRevision) {
-                throw new Error(`device ${project.hostname} has conflicting project policy revisions`);
-            }
-            this.expectedPolicyByHost.set(project.hostname, project.policyRevision);
-            this.projects.set(project.projectId, project);
-        }
-
-        this.router = new FleetRouter(devices, projects);
+        this.router = new FleetRouter(devices, []);
         this.generationStore = options.generationStore ?? new MemoryGenerationStore();
         this.audit = options.audit ?? new NullAuditSink();
         this.callTimeoutMs = options.callTimeoutMs ?? 30_000;
@@ -166,6 +147,7 @@ export class FleetGateway {
     }
 
     acceptSocket(socket: FleetGatewaySocket): string {
+        this.counters.connections++;
         if (this.stopped) throw new FleetGatewayError('GATEWAY_STOPPED', 'gateway is stopped');
         const session: GatewaySession = {
             socket,
@@ -219,114 +201,33 @@ export class FleetGateway {
         return session.sessionId;
     }
 
-    async dispatch(
-        projectId: string,
-        hostnameInput: string,
-        toolName: string,
-        args: Record<string, unknown> = {},
-        timeoutMs = this.callTimeoutMs,
-    ): Promise<unknown> {
-        if (this.stopped) throw new FleetGatewayError('GATEWAY_STOPPED', 'gateway is stopped');
-        if (this.pendingCalls.size >= this.maxPendingCalls) {
-            throw new FleetGatewayError('GATEWAY_BUSY', 'gateway has too many pending calls');
-        }
-        const hostname = canonicalHostname(hostnameInput);
-        let descriptor: AgentDescriptor;
-        try {
-            descriptor = this.router.resolve(projectId, hostname);
-        } catch (error) {
-            if (error instanceof FleetRoutingError) {
-                throw new FleetGatewayError(error.code, error.message, { ...error.details });
-            }
-            throw error;
-        }
-        const session = this.sessionsById.get(descriptor.sessionId);
-        if (!session || !session.authenticated || session.generation === null || session.socket.readyState !== SOCKET_OPEN) {
-            throw new FleetGatewayError('TARGET_OFFLINE', `target ${hostname} is offline`, { projectId, hostname });
-        }
-        const callId = randomUUID();
-        const generation = session.generation;
-        const createdAtMs = Date.now();
-        const record: FleetGatewayCallRecord = {
-            callId,
-            scopeKind: 'project',
-            projectId,
-            hostname,
-            toolName,
-            sessionId: session.sessionId,
-            generation,
-            status: 'pending',
-            createdAtMs,
-            completedAtMs: null,
-            code: null,
-            error: null,
-        };
-        this.setCallRecord(record);
-
-        const response = new Promise<unknown>((resolve, reject) => {
-            const timer = setTimeout(() => {
-                const pending = this.pendingCalls.get(callId);
-                if (!pending) return;
-                this.pendingCalls.delete(callId);
-                this.send(session, { type: 'cancel', callId, generation });
-                const error = new FleetGatewayError('CALL_TIMEOUT', `fleet call ${callId} timed out`, {
-                    callId, projectId, hostname, toolName,
-                });
-                this.finishCallRecord(callId, 'timeout', error.code, error.message);
-                void this.auditCall(record, 'timeout', error.code, Date.now() - createdAtMs);
-                reject(error);
-            }, Math.max(1, timeoutMs));
-            this.pendingCalls.set(callId, {
-                callId,
-                sessionId: session.sessionId,
-                generation,
-                scopeKind: 'project',
-                projectId,
-                hostname,
-                toolName,
-                timer,
-                resolve,
-                reject,
-                createdAtMs,
-            });
-        });
-
-        this.send(session, {
-            type: 'call',
-            callId,
-            scopeKind: 'project',
-            projectId,
-            hostname,
-            toolName,
-            args,
-            generation,
-        });
-        void this.auditCall(record, 'dispatched');
-        return response;
+    // Transitional source/API aliases; no project/device authorization in the transport.
+    async dispatch(projectId: string, hostname: string, tool: string, args: Record<string, unknown> = {}, timeoutMs = this.callTimeoutMs): Promise<unknown> {
+        return this.dispatchDevice(hostname, tool, { ...args, _lcm_context: { project_id: projectId } }, timeoutMs);
     }
-
-    async dispatchMachine(
+    async dispatchMachine(hostname: string, tool: string, args: Record<string, unknown> = {}, _explicitAuthorization = false, timeoutMs = this.callTimeoutMs): Promise<unknown> {
+        return this.dispatchDevice(hostname, tool, args, timeoutMs);
+    }
+    async dispatchDevice(
         hostnameInput: string,
         toolName: string,
         args: Record<string, unknown> = {},
-        explicitAuthorization = false,
         timeoutMs = this.callTimeoutMs,
+        suppliedCallId?: string,
     ): Promise<unknown> {
-        if (!explicitAuthorization) throw new FleetGatewayError('PROJECT_DEVICE_DENIED', 'machine/control dispatch requires explicit current-task authorization');
         if (this.stopped) throw new FleetGatewayError('GATEWAY_STOPPED', 'gateway is stopped');
         if (this.pendingCalls.size >= this.maxPendingCalls) throw new FleetGatewayError('GATEWAY_BUSY', 'gateway has too many pending calls');
         const hostname = canonicalHostname(hostnameInput);
-        if (!this.devices.has(hostname)) throw new FleetGatewayError('PROJECT_DEVICE_DENIED', `unknown machine/control target ${hostname}`, { hostname });
+        if (!this.devices.has(hostname)) throw new FleetGatewayError('IDENTITY_MISMATCH', `Device is not enrolled: ${hostname}`, { hostname });
         const session = this.activeByHost.get(hostname);
-        const expectedPolicy = this.expectedPolicyByHost.get(hostname);
-        if (!session || !session.authenticated || session.generation === null || session.socket.readyState !== SOCKET_OPEN || (expectedPolicy && session.policyRevision !== expectedPolicy)) {
-            throw new FleetGatewayError('TARGET_OFFLINE', `target ${hostname} is offline`, { hostname, scopeKind: 'machine_control' });
+        if (!session || !session.authenticated || session.generation === null || session.socket.readyState !== SOCKET_OPEN) {
+            throw new FleetGatewayError('TARGET_OFFLINE', `target ${hostname} is offline`, { hostname, scopeKind: 'device' });
         }
-        const callId = randomUUID();
+        const callId = suppliedCallId ?? randomUUID();
         const generation = session.generation;
         const createdAtMs = Date.now();
         const record: FleetGatewayCallRecord = {
-            callId, scopeKind: 'machine_control', projectId: null, hostname, toolName, sessionId: session.sessionId, generation,
+            callId, scopeKind: 'device', projectId: null, hostname, toolName, sessionId: session.sessionId, generation,
             status: 'pending', createdAtMs, completedAtMs: null, code: null, error: null,
         };
         this.setCallRecord(record);
@@ -336,28 +237,32 @@ export class FleetGateway {
                 if (!pending) return;
                 this.pendingCalls.delete(callId);
                 this.send(session, { type: 'cancel', callId, generation });
-                const error = new FleetGatewayError('CALL_TIMEOUT', `fleet call ${callId} timed out`, { callId, hostname, toolName, scopeKind: 'machine_control' });
+                const error = new FleetGatewayError('CALL_TIMEOUT', `fleet call ${callId} timed out`, { callId, hostname, toolName, scopeKind: 'device' });
                 this.finishCallRecord(callId, 'timeout', error.code, error.message);
                 void this.auditCall(record, 'timeout', error.code, Date.now() - createdAtMs);
                 reject(error);
             }, Math.max(1, timeoutMs));
             this.pendingCalls.set(callId, {
-                callId, sessionId: session.sessionId, generation, scopeKind: 'machine_control', projectId: null, hostname, toolName, timer, resolve, reject, createdAtMs,
+                callId, sessionId: session.sessionId, generation, scopeKind: 'device', projectId: null, hostname, toolName, timer, resolve, reject, createdAtMs,
             });
         });
         this.send(session, {
-            type: 'call', callId, scopeKind: 'machine_control', machineApproval: explicitAuthorization, hostname, toolName, args, generation,
+            type: 'call', callId, scopeKind: 'device', hostname, toolName, args, generation,
         });
         void this.auditCall(record, 'dispatched');
         return response;
     }
 
+    beginDeviceCall(hostname: string, tool: string, args: Record<string, unknown>, timeoutMs = this.callTimeoutMs) {
+        const callId = randomUUID();
+        return { callId, result: this.dispatchDevice(hostname, tool, args, timeoutMs, callId) };
+    }
+
     machineDeviceStatus(hostnameInput: string): FleetGatewayDeviceStatus {
         const hostname = canonicalHostname(hostnameInput);
-        if (!this.devices.has(hostname)) throw new FleetGatewayError('PROJECT_DEVICE_DENIED', `unknown machine/control target ${hostname}`);
+        if (!this.devices.has(hostname)) throw new FleetGatewayError('IDENTITY_MISMATCH', `Device is not enrolled: ${hostname}`);
         const session = this.activeByHost.get(hostname) ?? this.lastByHost.get(hostname);
-        const expectedPolicy = this.expectedPolicyByHost.get(hostname);
-        const online = Boolean(session && session.authenticated && session.socket.readyState === SOCKET_OPEN && (!expectedPolicy || session.policyRevision === expectedPolicy));
+        const online = Boolean(session && session.authenticated && session.socket.readyState === SOCKET_OPEN);
         return {
             hostname, online, sessionId: online ? session!.sessionId : null, generation: online ? session!.generation : null,
             policyRevision: session?.policyRevision ?? null, agentVersion: session?.agentVersion ?? null,
@@ -399,37 +304,8 @@ export class FleetGateway {
         return [...this.callRecords.values()].slice(-bounded).reverse().map((record) => ({ ...record }));
     }
 
-    deviceStatus(projectId: string, hostnameInput: string): FleetGatewayDeviceStatus {
-        const hostname = canonicalHostname(hostnameInput);
-        const project = this.projects.get(projectId);
-        if (!project || project.hostname !== hostname) {
-            throw new FleetGatewayError('PROJECT_DEVICE_DENIED', `project ${projectId} is not authorized for ${hostname}`);
-        }
-        const session = this.activeByHost.get(hostname) ?? this.lastByHost.get(hostname);
-        const expectedPolicy = this.expectedPolicyByHost.get(hostname);
-        const online = Boolean(
-            session
-            && session.authenticated
-            && session.socket.readyState === SOCKET_OPEN
-            && session.policyRevision === expectedPolicy,
-        );
-        return {
-            hostname,
-            online,
-            sessionId: online ? session!.sessionId : null,
-            generation: online ? session!.generation : null,
-            policyRevision: session?.policyRevision ?? null,
-            agentVersion: session?.agentVersion ?? null,
-            connectedAtMs: session?.connectedAtMs ?? null,
-            lastSeenAtMs: session?.lastSeenAtMs ?? null,
-        };
-    }
-
-    listProjectDevices(projectId: string): FleetGatewayDeviceStatus[] {
-        const project = this.projects.get(projectId);
-        if (!project) throw new FleetGatewayError('PROJECT_DEVICE_DENIED', `unknown project ${projectId}`);
-        return [this.deviceStatus(projectId, project.hostname)];
-    }
+    deviceStatus(_projectId: string, hostname: string): FleetGatewayDeviceStatus { return this.machineDeviceStatus(hostname); }
+    listProjectDevices(_projectId: string): FleetGatewayDeviceStatus[] { return this.listKnownDeviceStatuses(); }
 
     addDeviceBinding(device: DeviceBinding): DeviceBinding {
         const hostname = canonicalHostname(device.hostname);
@@ -466,12 +342,11 @@ export class FleetGateway {
     listKnownDeviceStatuses(): Array<FleetGatewayDeviceStatus & { publicKeyFingerprint: string }> {
         return [...this.devices.values()].map((device) => {
             const session = this.activeByHost.get(device.hostname) ?? this.lastByHost.get(device.hostname);
-            const expectedPolicy = this.expectedPolicyByHost.get(device.hostname);
             const online = Boolean(
                 session
                 && session.authenticated
                 && session.socket.readyState === SOCKET_OPEN
-                && (!expectedPolicy || session.policyRevision === expectedPolicy),
+               ,
             );
             return {
                 hostname: device.hostname,
@@ -506,6 +381,7 @@ export class FleetGateway {
     }
 
     private async handleMessage(session: GatewaySession, data: unknown): Promise<void> {
+        this.counters.receivedBytes += typeof data === 'string' ? Buffer.byteLength(data) : Buffer.isBuffer(data) ? data.length : 0;
         const message = this.parseMessage(data);
         if (!session.authenticated) {
             if (message.type !== 'hello') {
@@ -552,15 +428,6 @@ export class FleetGateway {
         if (fingerprint !== binding.publicKeyFingerprint) {
             throw new FleetGatewayError('IDENTITY_MISMATCH', `agent identity does not match pinned identity for ${hostname}`);
         }
-        const expectedPolicy = this.expectedPolicyByHost.get(hostname);
-        if (expectedPolicy && expectedPolicy !== policyRevision) {
-            throw new FleetGatewayError('POLICY_SKEW', `agent policy revision does not match gateway policy for ${hostname}`, {
-                hostname,
-                expectedPolicy,
-                agentPolicy: policyRevision,
-            });
-        }
-
         const previous = this.activeByHost.get(hostname);
         if (previous && previous.sessionId !== session.sessionId) {
             if (previous.authenticated && previous.socket.readyState === SOCKET_OPEN) {
@@ -732,6 +599,7 @@ export class FleetGateway {
     }
 
     private setCallRecord(record: FleetGatewayCallRecord): void {
+        this.counters.calls++;
         this.callRecords.set(record.callId, record);
         while (this.callRecords.size > this.callRecordLimit) {
             const oldest = this.callRecords.keys().next().value as string | undefined;
@@ -749,6 +617,10 @@ export class FleetGateway {
     ): void {
         const current = this.callRecords.get(callId);
         if (!current) return;
+        if (current.status === 'pending' && status !== 'pending') {
+            this.counters[status]++;
+            this.counters.latencyTotalMs += Date.now() - current.createdAtMs;
+        }
         this.callRecords.set(callId, {
             ...current,
             status,
@@ -800,7 +672,9 @@ export class FleetGateway {
 
     private send(session: GatewaySession, message: GatewayWireMessage): void {
         if (session.socket.readyState !== SOCKET_OPEN) return;
-        session.socket.send(JSON.stringify(message));
+        const body = JSON.stringify(message);
+        this.counters.sentBytes += Buffer.byteLength(body);
+        session.socket.send(body);
     }
 
     private parseMessage(data: unknown): GatewayWireMessage {

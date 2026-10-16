@@ -194,6 +194,7 @@ export class FleetAgent {
                 return true;
             },
             execute: async (toolName, args, context) => {
+                if (context.scopeKind === 'device') throw new Error('Use DeviceAgent for device transport');
                 const authorization: ControlAuthorization = context.scopeKind === 'machine_control'
                     ? await this.authorizer.authorizeMachine(context.hostname, context.machineApproval)
                     : await this.authorizer.authorize(context.projectId!, context.hostname);

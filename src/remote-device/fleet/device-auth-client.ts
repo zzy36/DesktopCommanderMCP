@@ -52,7 +52,7 @@ async function main(): Promise<void> {
     const origin = adminUrl.origin;
     const hostname = requireArg('--hostname');
     const fingerprint = requireArg('--fingerprint');
-    const policyRevision = requireArg('--policy-revision');
+    const policyRevision = arg('--policy-revision') ?? 'device-v1';
     const json = has('--json');
     const verifier = randomBytes(32).toString('base64url');
     const challenge = createHash('sha256').update(verifier, 'utf8').digest('base64url');

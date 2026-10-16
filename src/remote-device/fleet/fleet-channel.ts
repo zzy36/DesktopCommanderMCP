@@ -2,7 +2,7 @@ import { sign } from 'node:crypto';
 import { canonicalHostname, handshakePayload } from './identity.js';
 import { MAX_FLEET_FRAME_BYTES } from './wire-limits.js';
 
-export type FleetScopeKind = 'project' | 'machine_control';
+export type FleetScopeKind = 'project' | 'machine_control' | 'device';
 
 export interface FleetChannelExecutorContext {
     scopeKind: FleetScopeKind;
@@ -29,6 +29,7 @@ export interface FleetChannelOptions {
     privateKey: Parameters<typeof sign>[2];
     authorize: (projectId: string, hostname: string) => boolean | Promise<boolean>;
     authorizeMachine?: (hostname: string, explicitAuthorization: boolean) => boolean | Promise<boolean>;
+    authorizeDevice?: (hostname: string) => boolean | Promise<boolean>;
     execute: FleetChannelExecutor;
     reconnectBaseMs?: number;
     reconnectMaxMs?: number;
@@ -245,7 +246,7 @@ export class FleetChannel {
 
     private async handleCall(message: FleetWireMessage): Promise<void> {
         const callId = typeof message.callId === 'string' ? message.callId : null;
-        const scopeKind: FleetScopeKind = message.scopeKind === 'machine_control' ? 'machine_control' : 'project';
+        const scopeKind: FleetScopeKind = message.scopeKind === 'device' ? 'device' : message.scopeKind === 'machine_control' ? 'machine_control' : 'project';
         const projectId = typeof message.projectId === 'string' && message.projectId.trim() ? message.projectId : null;
         const machineApproval = message.machineApproval === true;
         const hostname = typeof message.hostname === 'string' ? canonicalHostname(message.hostname) : null;
@@ -270,7 +271,12 @@ export class FleetChannel {
             return;
         }
         try {
-            if (scopeKind === 'machine_control') {
+            if (scopeKind === 'device') {
+                if (!this.options.authorizeDevice || !(await this.options.authorizeDevice(hostname))) {
+                    this.sendResult({ callId, generation, ok: false, code: 'IDENTITY_MISMATCH' });
+                    return;
+                }
+            } else if (scopeKind === 'machine_control') {
                 if (!machineApproval || !this.options.authorizeMachine || !(await this.options.authorizeMachine(hostname, machineApproval))) {
                     this.sendResult({ callId, generation, ok: false, code: 'PROJECT_DEVICE_DENIED' });
                     return;

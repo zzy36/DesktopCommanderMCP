@@ -295,7 +295,7 @@ export class FleetEnrollmentStore {
 function clampTtl(ttlMs: number): number { return Math.max(60_000, Math.min(ttlMs, 60 * 60_000)); }
 function hashCode(code: string): string { return createHash('sha256').update(code, 'utf8').digest('hex'); }
 function normalizeFingerprint(value: string): string { const result = value.toLowerCase(); if (!/^sha256:[0-9a-f]{64}$/.test(result)) throw new Error('invalid device fingerprint'); return result; }
-function assertPolicyRevision(value: string): void { if (!/^control@[0-9a-f]{12}$/.test(value)) throw new Error('invalid policy revision'); }
+function assertPolicyRevision(value: string): void { if (value !== 'device-v1' && !/^control@[0-9a-f]{12}$/.test(value)) throw new Error('invalid protocol revision'); }
 function normalizeUserCode(value: string): string { return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 function generateUserCode(): string {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

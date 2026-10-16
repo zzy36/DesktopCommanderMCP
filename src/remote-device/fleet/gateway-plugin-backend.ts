@@ -1,191 +1,37 @@
 import { FleetGateway } from './fleet-gateway.js';
-import { FleetPluginBackend, FleetPluginDeviceView } from './plugin-server.js';
+import { FleetPluginBackend } from './plugin-server.js';
 import { canonicalHostname } from './identity.js';
-
-export interface FleetPluginProbeBinding {
-    projectId: string;
-    hostname: string;
-    path?: string;
-}
-
-export interface FleetGatewayPluginBackendOptions {
-    gateway: FleetGateway;
-    probes: FleetPluginProbeBinding[];
-    callTimeoutMs?: number;
-    maxWriteBytes?: number;
-}
-
+export interface FleetPluginProbeBinding { projectId: string; hostname: string; path?: string; }
+export interface FleetGatewayPluginBackendOptions { gateway: FleetGateway; probes?: FleetPluginProbeBinding[]; callTimeoutMs?: number; maxWriteBytes?: number; }
 export class FleetGatewayPluginBackend implements FleetPluginBackend {
     private readonly gateway: FleetGateway;
-    private readonly probes = new Map<string, FleetPluginProbeBinding>();
-    private readonly callTimeoutMs: number;
-    private readonly maxWriteBytes: number;
-
-    constructor(options: FleetGatewayPluginBackendOptions) {
-        this.gateway = options.gateway;
-        this.callTimeoutMs = options.callTimeoutMs ?? 5_000;
-        this.maxWriteBytes = options.maxWriteBytes ?? 4_096;
-        for (const probe of options.probes) {
-            const normalized: FleetPluginProbeBinding = {
-                ...probe,
-                hostname: canonicalHostname(probe.hostname),
-            };
-            if (!normalized.projectId) throw new Error('probe binding requires projectId');
-            const key = this.key(normalized.projectId, normalized.hostname);
-            if (this.probes.has(key)) throw new Error(`duplicate Fleet Plugin probe binding: ${key}`);
-            this.probes.set(key, normalized);
-        }
+    private readonly timeout: number;
+    constructor(options: FleetGatewayPluginBackendOptions) { this.gateway = options.gateway; this.timeout = options.callTimeoutMs ?? 60000; }
+    async fleetStatus(_legacy: string, hostname: string) { return { ...this.gateway.machineDeviceStatus(hostname), exact_host: true }; }
+    async listDevices(_legacy = '') { return this.gateway.listKnownDeviceStatuses(); }
+    async callDeviceTool(hostname: string, name: string, args: Record<string, unknown>) {
+        const call = this.gateway.beginDeviceCall(hostname, name, args, this.timeout);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            return await Promise.race([call.result, new Promise(resolve => { timer = setTimeout(() => resolve({ content: [{ type: 'text', text: JSON.stringify({ status: 'running', call_id: call.callId, hostname: canonicalHostname(hostname), next: 'get_tool_result; do not repeat the original operation' }) }] }), 2500); })]);
+        } finally { if (timer) clearTimeout(timer); }
     }
-
-    async fleetStatus(projectId: string, hostnameInput: string): Promise<Record<string, unknown>> {
-        const hostname = canonicalHostname(hostnameInput);
-        const status = this.gateway.deviceStatus(projectId, hostname);
-        return {
-            project_id: projectId,
-            hostname: status.hostname,
-            online: status.online,
-            exact_host: true,
-            generation: status.generation,
-            policy_revision: status.policyRevision,
-            connected_at_ms: status.connectedAtMs,
-            last_seen_at_ms: status.lastSeenAtMs,
-        };
+    async callProjectTool(project: string, hostname: string, name: string, args: Record<string, unknown>) { return this.callDeviceTool(hostname, name, { ...args, _lcm_context: { project_id: project } }); }
+    async callMachineTool(hostname: string, name: string, args: Record<string, unknown>, _legacy: boolean) { return this.callDeviceTool(hostname, name, args); }
+    async ping(_legacy: string, hostname: string) {
+        const start = performance.now();
+        const result = await this.gateway.dispatchDevice(hostname, '__lcm_ping', {}, Math.min(this.timeout, 15000));
+        return { pong: true, hostname: canonicalHostname(hostname), round_trip_ms: Math.round((performance.now() - start) * 100) / 100, device: result };
     }
-
-    async listDevices(projectId: string): Promise<FleetPluginDeviceView[]> {
-        return this.gateway.listProjectDevices(projectId).map((status) => ({
-            hostname: status.hostname,
-            online: status.online,
-            policyRevision: status.policyRevision ?? undefined,
-        }));
-    }
-
-    async callProjectTool(
-        projectId: string,
-        hostnameInput: string,
-        toolName: string,
-        args: Record<string, unknown>,
-    ): Promise<unknown> {
-        const hostname = canonicalHostname(hostnameInput);
-        return this.gateway.dispatch(projectId, hostname, toolName, { ...args }, this.callTimeoutMs);
-    }
-
-    async callMachineTool(
-        hostnameInput: string,
-        toolName: string,
-        args: Record<string, unknown>,
-        explicitAuthorization: boolean,
-    ): Promise<unknown> {
-        const hostname = canonicalHostname(hostnameInput);
-        return this.gateway.dispatchMachine(hostname, toolName, { ...args }, explicitAuthorization, this.callTimeoutMs);
-    }
-
-    async ping(projectId: string, hostnameInput: string): Promise<Record<string, unknown>> {
-        const hostname = canonicalHostname(hostnameInput);
-        const status = this.gateway.deviceStatus(projectId, hostname);
-        if (!status.online) {
-            throw Object.assign(new Error(`target ${hostname} is offline`), { code: 'TARGET_OFFLINE' });
-        }
-        return {
-            pong: true,
-            project_id: projectId,
-            hostname,
-            timestamp_ms: Date.now(),
-            generation: status.generation,
-            policy_revision: status.policyRevision,
-            last_seen_at_ms: status.lastSeenAtMs,
-        };
-    }
-
-    async whoAmI(): Promise<Record<string, unknown>> {
-        return {
-            product: 'Local Control MCP',
-            short_name: 'LCM',
-            server: 'local_control_mcp',
-            hosted: false,
-            transport: 'self_hosted_fleet',
-            hosted_rdc_quota: 'not_applicable',
-        };
-    }
-
-    async getToolResult(projectId: string, hostnameInput: string, callId: string): Promise<Record<string, unknown>> {
-        const hostname = canonicalHostname(hostnameInput);
-        this.gateway.deviceStatus(projectId, hostname);
+    async whoAmI() { return { product: 'Local Control MCP', hosted: false, model: 'owner-scoped device transport', governance: 'external target policy', automatic_device_fallback: false }; }
+    async getToolResult(_legacy: string, hostname: string, callId: string) {
         const record = this.gateway.getCallRecord(callId);
-        if (!record || record.projectId !== projectId || record.hostname !== hostname) {
-            throw Object.assign(new Error(`remote call is not visible to ${projectId} on ${hostname}`), { code: 'PROJECT_DEVICE_DENIED' });
-        }
+        if (!record || (hostname && record.hostname !== canonicalHostname(hostname))) throw Object.assign(new Error('Call not found on the selected device'), { code: 'CALL_NOT_FOUND' });
         return { ...record };
     }
-
-    async listRemoteToolCalls(projectId: string, hostnameInput: string | undefined, limit: number): Promise<Record<string, unknown>[]> {
-        const hostname = hostnameInput ? canonicalHostname(hostnameInput) : undefined;
-        if (hostname) this.gateway.deviceStatus(projectId, hostname);
-        else this.gateway.listProjectDevices(projectId);
-        const bounded = Math.max(1, Math.min(limit, 50));
-        return this.gateway.listCallRecords(1024)
-            .filter((record) => record.projectId === projectId && (!hostname || record.hostname === hostname))
-            .slice(0, bounded)
-            .map((record) => ({ ...record }));
+    async listRemoteToolCalls(_legacy: string, hostname: string | undefined, limit: number) {
+        const exact = hostname ? canonicalHostname(hostname) : undefined;
+        return this.gateway.listCallRecords(1024).filter(r => !exact || r.hostname === exact).slice(0, Math.max(1, Math.min(limit, 100))).map(r => ({ ...r }));
     }
-
-    // Migration-only probe helpers. They are no longer exposed on the user-facing MCP surface.
-    async readTestFile(projectId: string, hostnameInput: string): Promise<string> {
-        const probe = this.requireProbe(projectId, hostnameInput);
-        const result = await this.gateway.dispatch(
-            projectId,
-            probe.hostname,
-            'read_file',
-            probe.path ? { path: probe.path } : {},
-            this.callTimeoutMs,
-        );
-        return firstText(result);
-    }
-
-    async writeTestFile(
-        projectId: string,
-        hostnameInput: string,
-        content: string,
-    ): Promise<{ bytesWritten: number }> {
-        const probe = this.requireProbe(projectId, hostnameInput);
-        const bytesWritten = Buffer.byteLength(content, 'utf8');
-        if (bytesWritten > this.maxWriteBytes) {
-            const error = new Error(`write probe exceeds ${this.maxWriteBytes} bytes`);
-            Object.assign(error, { code: 'PROJECT_DEVICE_DENIED' });
-            throw error;
-        }
-        await this.gateway.dispatch(
-            projectId,
-            probe.hostname,
-            'write_file',
-            probe.path ? { path: probe.path, content, mode: 'rewrite' } : { content, mode: 'rewrite' },
-            this.callTimeoutMs,
-        );
-        return { bytesWritten };
-    }
-
-    private requireProbe(projectId: string, hostnameInput: string): FleetPluginProbeBinding {
-        const hostname = canonicalHostname(hostnameInput);
-        const probe = this.probes.get(this.key(projectId, hostname));
-        if (!probe) {
-            const error = new Error(`no write-probe binding for ${projectId} on ${hostname}`);
-            Object.assign(error, { code: 'PROJECT_DEVICE_DENIED' });
-            throw error;
-        }
-        return probe;
-    }
-
-    private key(projectId: string, hostname: string): string {
-        return `${projectId}\u0000${canonicalHostname(hostname)}`;
-    }
-}
-
-function firstText(result: unknown): string {
-    if (!result || typeof result !== 'object') return '';
-    const content = (result as { content?: unknown }).content;
-    if (!Array.isArray(content)) return '';
-    const item = content.find((entry) => entry && typeof entry === 'object' && (entry as { type?: unknown }).type === 'text');
-    return item && typeof (item as { text?: unknown }).text === 'string'
-        ? (item as { text: string }).text
-        : '';
+    async usageStats() { return this.gateway.usageStats(); }
 }
