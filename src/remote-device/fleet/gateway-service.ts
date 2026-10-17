@@ -283,5 +283,5 @@ async function saveBridgeWindowModes(filePath: string, modes: Record<string, 'hi
 }
 
 function bridgeWindowModeCommand(mode: 'hidden' | 'visible'): string {
-    return "$ErrorActionPreference='Stop'; $runtime=(Get-Content -LiteralPath (Join-Path $env:ProgramData 'LocalControlMCP\\runtime.json') -Raw | ConvertFrom-Json).runtimeRoot; & (Join-Path $runtime 'deploy\\windows\\Set-LCMBridgeWindowMode.ps1') -ExpectedHostname $env:COMPUTERNAME -Mode " + mode;
+    return "$ErrorActionPreference='Stop'; $runtime=(Get-Content -LiteralPath (Join-Path $env:ProgramData 'LocalControlMCP\\runtime.json') -Raw | ConvertFrom-Json).runtimeRoot; $script=Join-Path $runtime 'deploy\\windows\\Set-LCMBridgeWindowMode.ps1'; & pwsh.exe -NoProfile -ExecutionPolicy Bypass -File $script -ExpectedHostname $env:COMPUTERNAME -Mode " + mode + "; if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}";
 }
