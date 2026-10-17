@@ -159,6 +159,23 @@ export function getShellSpawnArgs(shellPath: string, command: string): ShellSpaw
   const shellName = path.basename(shellPath).toLowerCase();
   const executable = resolveProgramPath(shellPath);
 
+  // A request to start an interactive Windows PowerShell session must launch
+  // that shell directly. Wrapping `powershell -NoLogo` inside another
+  // PowerShell `-Command` changes its stdin/stdout behavior and can suppress
+  // the prompt, which makes start_process/interact_with_process wait until
+  // timeout even though the shell is ready for input.
+  if (isWindows()) {
+    const direct = command.trim().match(/^(powershell(?:\.exe)?|pwsh(?:\.exe)?)(?:\s+((?:-(?:NoLogo|NoProfile|NoExit)(?:\s+|$))*))?$/i);
+    if (direct) {
+      const args = (direct[2] ?? '').trim().split(/\s+/).filter(Boolean);
+      return {
+        executable: resolveProgramPath(direct[1]),
+        args,
+        useShellOption: false
+      };
+    }
+  }
+
   // Unix shells with login flag support
   if (shellName.includes('bash') || shellName.includes('zsh')) {
     return {

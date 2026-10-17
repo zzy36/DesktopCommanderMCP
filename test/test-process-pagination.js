@@ -31,20 +31,32 @@ async function testNewOutputBehavior() {
   const pid = startResult.structuredContent.pid;
   assert(pid, 'Should get PID');
   
-  // First read - get initial output
-  const read1 = await readProcessOutput({ pid, timeout_ms: 300 });
-  assert(!read1.isError, 'First read should succeed');
+  // First read - wait for the first actual process output rather than assuming
+  // Windows shell startup always fits inside one fixed 300ms interval.
   const ticks = (text) => text.match(/tick\d+/g) || [];
-  const ticks1 = ticks(read1.content[0].text);
+  let read1;
+  let ticks1 = [];
+  const firstDeadline = Date.now() + 2500;
+  do {
+    read1 = await readProcessOutput({ pid, timeout_ms: 300 });
+    assert(!read1.isError, 'First read should succeed');
+    ticks1 = ticks(read1.content[0].text);
+  } while (ticks1.length === 0 && Date.now() < firstDeadline);
+  assert(ticks1.length > 0, `First read phase should eventually receive process output, got: ${read1.content[0].text}`);
   console.log(`  First read got ${ticks1.length} tick lines`);
 
   // Wait for more output
   await wait(400);
 
   // Second read should get NEW output only
-  const read2 = await readProcessOutput({ pid, timeout_ms: 300 });
-  assert(!read2.isError, 'Second read should succeed');
-  const ticks2 = ticks(read2.content[0].text);
+  let read2;
+  let ticks2 = [];
+  const secondDeadline = Date.now() + 1500;
+  do {
+    read2 = await readProcessOutput({ pid, timeout_ms: 300 });
+    assert(!read2.isError, 'Second read should succeed');
+    ticks2 = ticks(read2.content[0].text);
+  } while (ticks2.length === 0 && Date.now() < secondDeadline);
   console.log(`  Second read got ${ticks2.length} tick lines`);
 
   assert(ticks2.length > 0, `Second read should return the ticks printed since the first read, got: ${read2.content[0].text}`);
@@ -157,13 +169,18 @@ async function testRuntimeInfo() {
   const pid = startResult.structuredContent.pid;
   assert(pid, 'Should get PID');
   
-  // Wait for process to complete
-  await wait(1000);
-  
-  const read = await readProcessOutput({ pid, timeout_ms: 1000 });
-  assert(!read.isError, 'Read should succeed');
-  assert(read.content[0].text.includes('runtime:'), 'Should show runtime');
-  assert(read.content[0].text.includes('Process completed'), 'Should show completion');
+  // Poll for completion instead of assuming shell startup + the command's
+  // 500ms delay always completes inside one fixed 1000ms sleep on Windows.
+  let read;
+  const deadline = Date.now() + 5000;
+  do {
+    read = await readProcessOutput({ pid, timeout_ms: 500 });
+    assert(!read.isError, 'Read should succeed');
+    if (read.content[0].text.includes('Process completed')) break;
+    await wait(100);
+  } while (Date.now() < deadline);
+  assert(read.content[0].text.includes('runtime:'), `Should show runtime once completed, got: ${read.content[0].text}`);
+  assert(read.content[0].text.includes('Process completed'), `Should show completion, got: ${read.content[0].text}`);
   
   console.log('✅ Test 5 passed: Runtime info works correctly');
 }

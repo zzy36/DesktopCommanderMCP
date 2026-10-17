@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import type { ChildProcess } from 'child_process';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomInt } from 'crypto';
 import { channel } from 'diagnostics_channel';
 import { existsSync, readdirSync } from 'fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
@@ -605,7 +605,7 @@ async function serveAllowedFile(request: IncomingMessage, response: ServerRespon
 async function startRenderServer(basedir: string): Promise<RenderServer> {
     const cookie = { name: RENDER_COOKIE_NAME, value: randomBytes(32).toString('hex') };
     const expected = `${cookie.name}=${cookie.value}`;
-    const server = createServer((request, response) => {
+    const handler = (request: IncomingMessage, response: ServerResponse) => {
         if (!request.headers.cookie?.split(/;\s*/).includes(expected)) {
             response.writeHead(403, { 'Content-Type': 'text/plain' }).end('Forbidden');
             return;
@@ -615,21 +615,44 @@ async function startRenderServer(basedir: string): Promise<RenderServer> {
             if (!response.headersSent) response.writeHead(500);
             response.end();
         });
-    });
-    await new Promise<void>((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(0, '127.0.0.1', resolve);
-    });
-
-    return {
-        port: (server.address() as { port: number }).port,
-        cookie,
-        close: () => new Promise<void>((resolve) => {
-            server.close(() => resolve());
-            // Chrome's keep-alive connections would hold close() open
-            server.closeAllConnections();
-        }),
     };
+
+    // Chromium blocks a fixed set of unsafe ports (for example 6665-6669 and
+    // 10080). On systems whose ephemeral range includes those ports, listen(0)
+    // can occasionally pick one and make an otherwise valid render fail with
+    // ERR_UNSAFE_PORT. Pick from a high range Chromium accepts and retry only
+    // on ordinary port collisions.
+    for (let attempt = 0; attempt < 32; attempt++) {
+        const server = createServer(handler);
+        const port = randomInt(12_000, 60_000);
+        try {
+            await new Promise<void>((resolve, reject) => {
+                const onError = (error: NodeJS.ErrnoException) => {
+                    server.off('listening', onListening);
+                    reject(error);
+                };
+                const onListening = () => {
+                    server.off('error', onError);
+                    resolve();
+                };
+                server.once('error', onError);
+                server.once('listening', onListening);
+                server.listen(port, '127.0.0.1');
+            });
+            return {
+                port,
+                cookie,
+                close: () => new Promise<void>((resolve) => {
+                    server.close(() => resolve());
+                    // Chrome's keep-alive connections would hold close() open
+                    server.closeAllConnections();
+                }),
+            };
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+        }
+    }
+    throw new Error('Could not allocate a browser-safe local port for PDF rendering');
 }
 
 /**

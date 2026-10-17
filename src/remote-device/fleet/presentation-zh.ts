@@ -86,7 +86,7 @@ const tools: Record<string, [string, string]> = {
   ],
   "list_processes": [
     "查看运行进程",
-    "列出准确设备进程、PID、CPU 和内存。"
+    "列出准确设备进程、PID、内存，以及运行时可用的 CPU 信息。"
   ],
   "shutdown": [
     "停止 LCM Agent",

@@ -11,6 +11,8 @@ scope.record('start_search','project.a',result('search session: search_1'));
 scope.record('start_search','project.b',result('search session: search_10'));
 const searches=scope.transform('list_searches','project.a',{},result('Active Searches (2):\n\nSession: search_10\n  Pattern: "sensitive"\n\nSession: search_1\n  Pattern: "allowed"'),'YUAN');
 assert(!JSON.stringify(searches).includes('sensitive'));assert(JSON.stringify(searches).includes('allowed'));
+const deviceConfig=JSON.parse(scope.transformDevice('get_config',result(JSON.stringify({version:'0.2.52',currentClient:{name:'desktop-commander-client',version:'1.0.0'},defaultShell:'pwsh.exe',fileReadLineLimit:1000,fileWriteLineLimit:50,telemetryEnabled:false,blockedCommands:['mkfs'],systemInfo:{platform:'win32',platformName:'Windows',isWindows:true,isLinux:false,isMacOS:false}})),'YUANS').content[0].text);
+assert.equal(deviceConfig.product,'Local Control MCP');assert.equal(deviceConfig.scope_kind,'device');assert.equal(deviceConfig.device_name,'YUANS');assert.equal(deviceConfig.defaultShell,'pwsh.exe');assert(!('currentClient' in deviceConfig));assert(!('version' in deviceConfig));
 const temp=await mkdtemp(path.join(os.tmpdir(),'lcm-path-'));
 try{
  const root=path.join(temp,'project');const outside=path.join(temp,'outside');await mkdir(root);await mkdir(outside);

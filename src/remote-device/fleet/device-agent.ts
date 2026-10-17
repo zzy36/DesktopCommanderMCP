@@ -5,6 +5,7 @@ import { FleetChannel } from './fleet-channel.js';
 import { InteractiveUserClient } from './interactive-user-bridge.js';
 import { canonicalHostname } from './identity.js';
 import { DeviceExecutor, checkExecutionPolicy } from './device-executor.js';
+import { ProjectResourceScope } from './project-tool-contract.js';
 import { ResolvedAgentServiceConfig } from './service-config.js';
 
 /** Owner-authenticated device transport; target execution policy is an external hook. */
@@ -12,6 +13,7 @@ export class DeviceAgent {
     private readonly desktop = new DesktopCommanderIntegration();
     private channel: FleetChannel | null = null;
     private fingerprint: string | null = null;
+    private readonly resources = new ProjectResourceScope();
     private readonly processContexts = new Map<number, string>();
     private readonly searchContexts = new Map<string, string>();
     private readonly hostname: string;
@@ -52,7 +54,7 @@ export class DeviceAgent {
                 const text = JSON.stringify(result);
                 if (name === 'start_process') { const match = text.match(/Process started with PID\s+(\d+)/i); if (match) this.processContexts.set(Number(match[1]), selected as string); }
                 if (name === 'start_search') { const match = text.match(/search session:\s*([^\s"\\]+)/i); if (match) this.searchContexts.set(match[1], selected as string); }
-                return result;
+                return this.resources.transformDevice(name, result, this.hostname);
             },
         });
         this.channel.start();

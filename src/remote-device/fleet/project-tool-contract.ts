@@ -193,6 +193,11 @@ export class ProjectResourceScope {
     return { content: [{ type: 'text', text: blocks.length ? blocks.join('\n\n') : (toolName === 'list_sessions' ? 'No LCM-owned terminal sessions.' : 'No LCM-owned searches.') }] };
   }
 
+  transformDevice(toolName: string, result: any, deviceName: string): any {
+    if (toolName === 'get_config') return this.sanitizeDeviceConfig(result, deviceName);
+    return result;
+  }
+
   transformMachine(toolName: string, ownerKey: string, result: any, deviceName: string): any {
     if (toolName === 'get_config') return this.sanitizeMachineConfig(result, deviceName);
     if (toolName !== 'list_sessions' && toolName !== 'list_searches') return result;
@@ -206,6 +211,21 @@ export class ProjectResourceScope {
       ? raw.split(/\r?\n/).filter(line => { const match = line.match(/^PID:\s*(\d+)(?:\b|,)/); return match && owned.has(match[1]); })
       : raw.split(/\r?\n\s*\r?\n/).filter(block => { const match = block.match(/^Session:\s*([^\s]+)\s*$/m); return match && owned.has(match[1]); });
     return { content: [{ type: 'text', text: blocks.length ? blocks.join('\n\n') : (toolName === 'list_sessions' ? 'No LCM-owned terminal sessions.' : 'No LCM-owned searches.') }] };
+  }
+
+  private sanitizeDeviceConfig(result: any, deviceName: string): any {
+    const raw = textFromToolResult(result);
+    let parsed: any = null;
+    try { parsed = JSON.parse(raw); } catch { /* fallback below */ }
+    const source = parsed?.config && typeof parsed.config === 'object' ? parsed.config : parsed;
+    const safe = source && typeof source === 'object' ? {
+      product: 'Local Control MCP', scope_kind: 'device', device_name: deviceName,
+      defaultShell: source.defaultShell,
+      fileReadLineLimit: source.fileReadLineLimit, fileWriteLineLimit: source.fileWriteLineLimit,
+      telemetryEnabled: source.telemetryEnabled, blockedCommands: source.blockedCommands,
+      systemInfo: source.systemInfo ? { platform: source.systemInfo.platform, platformName: source.systemInfo.platformName, isWindows: source.systemInfo.isWindows, isLinux: source.systemInfo.isLinux, isMacOS: source.systemInfo.isMacOS } : undefined,
+    } : { product: 'Local Control MCP', scope_kind: 'device', device_name: deviceName };
+    return { content: [{ type: 'text', text: JSON.stringify(safe, null, 2) }] };
   }
 
   private sanitizeMachineConfig(result: any, deviceName: string): any {
