@@ -87,7 +87,7 @@ Continuation result:
 - Do not re-enroll devices unless a real enrollment error appears.
 - Do not alter Gateway/OAuth/device trust without evidence.
 - Do not touch unrelated YUAN projects or HEMA Commerce files.
-## Temporary live freeze — 2026-10-18
+## Temporary live freeze - 2026-10-18
 - User accepted the current LCM/RDC state as a temporary freeze. Treat live Gateway/Admin implementation `3f0bbcc11b0b195bca698e5ab164b7bdff01b6e1` as the repair baseline; do not advance it without a reproducible issue or an explicit release decision.
 - Annotated Git tag: `rdc-supervisor-0.3.6-live-freeze-20261018` -> `3f0bbcc11b0b195bca698e5ab164b7bdff01b6e1`.
 - Windows Agents remain intentionally frozen at `680e0e90b0a44a7c5a6aa08c2ded5314eb992d17`; RDC remains pinned to 0.3.0 with three-machine autostart/restart supervision accepted.
