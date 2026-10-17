@@ -310,11 +310,11 @@ async function controlRdc(gateway: FleetGateway, hostname: string, action: RdcAc
     return extractRdcStatus(result, hostname);
 }
 
-function rdcControlCommand(action: RdcAction): string {
+export function rdcControlCommand(action: RdcAction): string {
     return "$ErrorActionPreference='Stop'; $script=Join-Path $env:ProgramData 'LocalControlMCP-RDC\\Control-RDC.ps1'; if(-not(Test-Path -LiteralPath $script)){throw 'RDC supervisor not installed'}; & 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' -NoLogo -NoProfile -ExecutionPolicy Bypass -File $script -ExpectedHostname $env:COMPUTERNAME -Action " + action + "; if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}";
 }
 
-function extractRdcStatus(value: unknown, hostname: string): RdcStatus {
+export function extractRdcStatus(value: unknown, hostname: string): RdcStatus {
     const texts: string[] = [];
     const visit = (item: unknown): void => {
         if (typeof item === 'string') { texts.push(item); return; }
