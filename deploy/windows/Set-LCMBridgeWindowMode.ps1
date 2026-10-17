@@ -20,11 +20,6 @@ if([string]::IsNullOrWhiteSpace($execute)){throw 'Interactive bridge PowerShell 
 $args=if($Mode -eq 'hidden'){'-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "'+$runner+'"'}else{'-NoProfile -ExecutionPolicy Bypass -File "'+$runner+'"'}
 $action=New-ScheduledTaskAction -Execute $execute -Argument $args
 Set-ScheduledTask -TaskName $taskName -Action $action | Out-Null
-$config=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-$config | Add-Member -NotePropertyName interactiveWindowMode -NotePropertyValue $Mode -Force
-$temp=$configPath+'.window-mode-'+$PID
-[IO.File]::WriteAllText($temp,($config|ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false))
-Move-Item -LiteralPath $temp -Destination $configPath -Force
 Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Milliseconds 350

@@ -4,12 +4,12 @@ const installer = await readFile(new URL('../deploy/windows/Install-LCMAgent.ps1
 const setter = await readFile(new URL('../deploy/windows/Set-LCMBridgeWindowMode.ps1', import.meta.url), 'utf8');
 const gateway = await readFile(new URL('../src/remote-device/fleet/gateway-service.ts', import.meta.url), 'utf8');
 assert.match(installer, /ValidateSet\('hidden','visible'\)/);
-assert.match(installer, /interactiveWindowMode=\$BridgeWindowMode/);
+assert.doesNotMatch(installer, /interactiveWindowMode/);
 assert.match(installer, /-WindowStyle Hidden/);
 assert.match(installer, /BridgeWindowMode='hidden'/);
 assert.match(setter, /LCMInteractiveUser-/);
 assert.match(setter, /Set-ScheduledTask/);
-assert.match(setter, /interactiveWindowMode/);
+assert.doesNotMatch(setter, /interactiveWindowMode/);
 assert.match(setter, /Stop-ScheduledTask/);
 assert.match(setter, /Start-ScheduledTask/);
 assert.match(gateway, /pwsh\.exe -NoProfile -ExecutionPolicy Bypass -File/);

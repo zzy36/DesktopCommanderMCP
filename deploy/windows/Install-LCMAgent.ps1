@@ -59,7 +59,7 @@ if(Test-Path -LiteralPath (Join-Path $network 'agent.json')){
   Set-Acl -LiteralPath $private -AclObject $acl
  }
  Copy-Item -LiteralPath $CaBundle -Destination (Join-Path $network 'ca.crt')
- $config=[ordered]@{schemaVersion=1;gatewayUrl=$GatewayUrl;hostname=$ExpectedHostname;stateDir=(Join-Path $network 'agent');deviceFirst=$true;interactiveStateDir=$bridge;interactiveWindowMode=$BridgeWindowMode;channel=@{reconnectBaseMs=1000;reconnectMaxMs=30000;heartbeatMs=10000;heartbeatTimeoutMs=90000;callTimeoutMs=55000;maxInFlight=8;completedResultCacheSize=256}}
+ $config=[ordered]@{schemaVersion=1;gatewayUrl=$GatewayUrl;hostname=$ExpectedHostname;stateDir=(Join-Path $network 'agent');deviceFirst=$true;interactiveStateDir=$bridge;channel=@{reconnectBaseMs=1000;reconnectMaxMs=30000;heartbeatMs=10000;heartbeatTimeoutMs=90000;callTimeoutMs=55000;maxInFlight=8;completedResultCacheSize=256}}
  [IO.File]::WriteAllText((Join-Path $network 'agent.json'),($config|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
  [IO.File]::WriteAllText((Join-Path $root 'runtime.json'),(@{schemaVersion=1;runtimeRoot=$runtime;runtimeCommit=$Release;version='0.3.5';presentation='private-cloud-only';deviceFirst=$true}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 }
