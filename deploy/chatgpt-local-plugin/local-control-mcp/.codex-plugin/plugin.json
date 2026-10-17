@@ -1,6 +1,6 @@
 {
   "name": "local-control-mcp",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Local Control MCP：本机 Codex 使用原生能力，远程 LCM 优先；同作用域、同 D0 的 RDC 用于故障恢复，LCM 健康后回切。",
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",

@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   const byName = new Map(exposed.map((tool: any) => [tool.name, tool]));
 
   const server = new Server(
-    { name: 'local-control-mcp', title: LCM_BRAND_TITLE, icons: LCM_ICONS, version: '0.3.5' },
+    { name: 'local-control-mcp', title: LCM_BRAND_TITLE, icons: LCM_ICONS, version: '0.3.6' },
     { capabilities: { tools: {} }, instructions: 'Local Control MCP 是自托管项目控制主通道。每次调用必须提供真实 L3 project_id，并由本机 .control 重新授权。此服务不调用托管 RDC。' },
   );
 

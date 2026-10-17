@@ -33,10 +33,12 @@ try {
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   assert.equal(client.getServerVersion().name, 'local-control-mcp-remote');
-  assert.equal(client.getServerVersion().version, '0.3.5');
+  assert.equal(client.getServerVersion().version, '0.3.6');
   assert.equal(client.getServerVersion().title, 'Local Control MCP');
   assert.deepEqual(client.getServerVersion().icons, LCM_ICONS);
-  assert.deepEqual(Buffer.from(LCM_ICONS[0].src.split(',')[1], 'base64'), await readFile(new URL('../deploy/chatgpt-local-plugin/local-control-mcp/assets/local-control-mcp.svg', import.meta.url)));
+  const embeddedIcon = Buffer.from(LCM_ICONS[0].src.split(',')[1], 'base64').toString('utf8').replace(/\r\n/g, '\n');
+  const canonicalIcon = (await readFile(new URL('../deploy/chatgpt-local-plugin/local-control-mcp/assets/local-control-mcp.svg', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  assert.equal(embeddedIcon, canonicalIcon);
   const listed = await client.listTools();
   assert.equal(listed.tools.length, 31);
   assert.equal(new Set(listed.tools.map(x => x.name)).size, 31);

@@ -6,7 +6,7 @@ import type { Duplex } from 'node:stream';
 import path from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import { JsonlAuditSink } from './audit-log.js';
-import { createFleetAdminHttpServer } from './admin-server.js';
+import { createFleetAdminHttpServer, type RdcAction, type RdcStatus } from './admin-server.js';
 import { FleetGateway, FleetGatewaySocket } from './fleet-gateway.js';
 import { FleetGatewayPluginBackend } from './gateway-plugin-backend.js';
 import { FleetEnrollmentStore } from './enrollment-store.js';
@@ -86,6 +86,22 @@ export async function startFleetGatewayService(
                 bridgeWindowModes[hostname.toUpperCase()] = mode;
                 await saveBridgeWindowModes(bridgeWindowModePath, bridgeWindowModes);
             },
+            onGetRdcStatuses: async () => {
+                const output: Record<string, RdcStatus> = {};
+                await Promise.all(gateway.listKnownDeviceStatuses().map(async (device) => {
+                    if (!device.online) {
+                        output[device.hostname] = { hostname: device.hostname, state: 'Offline', error: 'LCM agent offline' };
+                        return;
+                    }
+                    try {
+                        output[device.hostname] = await controlRdc(gateway, device.hostname, 'status');
+                    } catch (error) {
+                        output[device.hostname] = { hostname: device.hostname, state: 'Unknown', error: error instanceof Error ? error.message : String(error) };
+                    }
+                }));
+                return output;
+            },
+            onControlRdc: async (hostname, action) => controlRdc(gateway, hostname, action),
             oauthProvider: mcpRuntime.oauthProvider,
         })
         : null;
@@ -280,6 +296,43 @@ async function saveBridgeWindowModes(filePath: string, modes: Record<string, 'hi
     const temp = `${filePath}.tmp-${process.pid}`;
     await writeFile(temp, JSON.stringify(modes, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
     await rename(temp, filePath);
+}
+
+async function controlRdc(gateway: FleetGateway, hostname: string, action: RdcAction): Promise<RdcStatus> {
+    const status = gateway.machineDeviceStatus(hostname);
+    if (!status.online) throw new Error(`target ${hostname} is offline`);
+    const result = await gateway.dispatchDevice(hostname, 'start_process', {
+        command: rdcControlCommand(action),
+        shell: 'powershell.exe',
+        timeout_ms: 15000,
+        execution_context: 'system',
+    }, 20000);
+    return extractRdcStatus(result, hostname);
+}
+
+function rdcControlCommand(action: RdcAction): string {
+    return "$ErrorActionPreference='Stop'; $script=Join-Path $env:ProgramData 'LocalControlMCP-RDC\\Control-RDC.ps1'; if(-not(Test-Path -LiteralPath $script)){throw 'RDC supervisor not installed'}; & 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' -NoLogo -NoProfile -ExecutionPolicy Bypass -File $script -ExpectedHostname $env:COMPUTERNAME -Action " + action + "; if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}";
+}
+
+function extractRdcStatus(value: unknown, hostname: string): RdcStatus {
+    const texts: string[] = [];
+    const visit = (item: unknown): void => {
+        if (typeof item === 'string') { texts.push(item); return; }
+        if (Array.isArray(item)) { for (const child of item) visit(child); return; }
+        if (item && typeof item === 'object') for (const child of Object.values(item as Record<string, unknown>)) visit(child);
+    };
+    visit(value);
+    for (const text of texts.reverse()) {
+        for (const line of text.split(/\r?\n/).reverse()) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) continue;
+            try {
+                const parsed = JSON.parse(trimmed) as RdcStatus;
+                if (parsed && typeof parsed === 'object' && String(parsed.hostname ?? '').toUpperCase() === hostname.toUpperCase()) return parsed;
+            } catch { /* keep scanning wrapped tool output */ }
+        }
+    }
+    throw new Error(`RDC status payload missing for ${hostname}`);
 }
 
 function bridgeWindowModeCommand(mode: 'hidden' | 'visible'): string {

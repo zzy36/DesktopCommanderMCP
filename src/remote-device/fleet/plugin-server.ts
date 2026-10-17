@@ -106,7 +106,7 @@ export function createFleetPluginMcpServer(
 ): McpProtocolServer {
     const enforceScopes = options.enforceOAuthScopes === true;
     const server = new McpProtocolServer(
-        { name: 'local-control-mcp-remote', title: LCM_BRAND_TITLE, icons: LCM_ICONS, version: '0.3.5' },
+        { name: 'local-control-mcp-remote', title: LCM_BRAND_TITLE, icons: LCM_ICONS, version: '0.3.6' },
         { capabilities: { tools: {} }, instructions: 'Local Control MCP is an Owner-scoped device transport. If the exact hostname is already known from the current task, call the target tool directly: do not preflight list_devices, fleet_status, or ping. Use list_devices only when device discovery is actually needed. Select the exact enrolled hostname for execution; never redirect an offline device. Target governance is external and must be resolved before transport selection. Reuse the already-resolved exact D0 for the current task unless the user changes target or a real routing error occurs. Use interactive for logged-in user tools; never downgrade to SYSTEM. Do not replay uncertain writes.' },
     );
 

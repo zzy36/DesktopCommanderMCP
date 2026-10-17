@@ -19,6 +19,8 @@ await enrollmentStore.initialize();
 let approvedDevice = null;
 const bridgeWindowModes = { YUAN: 'hidden' };
 let requestedBridgeWindowMode = null;
+let requestedRdcAction = null;
+const rdcStatuses = { YUAN: { hostname: 'YUAN', state: 'Running', enabled: true, autostart: true, windowMode: 'hidden', rdcVersion: '0.3.0', processCount: 1, pids: [4321] } };
 const secret = randomBytes(32).toString('base64url');
 const security = new LocalAdminSecurity('http://127.0.0.1', secret);
 const server = createFleetAdminHttpServer(gateway, {
@@ -30,6 +32,11 @@ const server = createFleetAdminHttpServer(gateway, {
   onApproveDevice: async (device) => { approvedDevice = device; },
   bridgeWindowModes,
   onSetBridgeWindowMode: async (hostname, mode) => { requestedBridgeWindowMode = { hostname, mode }; },
+  onGetRdcStatuses: async () => rdcStatuses,
+  onControlRdc: async (hostname, action) => {
+    requestedRdcAction = { hostname, action };
+    return { ...rdcStatuses[hostname], hostname, state: action === 'stop' ? 'Ready' : 'Running' };
+  },
 });
 
 try {
@@ -57,6 +64,9 @@ try {
   assert.match(html, /设备控制中心/);
   assert.match(html, /class="device-grid"/);
   assert.match(html, /data-window-mode="hidden"/);
+  assert.match(html, /RDC 备用通道/);
+  assert.match(html, /data-rdc-action="restart"/);
+  assert.match(html, /自动启动/);
   assert.match(html, /btn-danger/);
   assert.match(html, /新设备引导/);
   assert.doesNotMatch(html, /if\(confirm\('切换 /);
@@ -90,6 +100,24 @@ try {
   assert.equal(response.status, 200);
   assert.deepEqual(requestedBridgeWindowMode, { hostname: 'YUAN', mode: 'visible' });
   assert.equal(bridgeWindowModes.YUAN, 'visible');
+
+  response = await fetch(`${base}/api/rdc`);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).devices.YUAN.rdcVersion, '0.3.0');
+
+  response = await fetch(`${base}/api/devices/rdc`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ hostname: 'YUAN', action: 'restart' }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(requestedRdcAction, { hostname: 'YUAN', action: 'restart' });
+  assert.equal((await response.json()).status.state, 'Running');
+
+  response = await fetch(`${base}/api/devices/rdc`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ hostname: 'YUAN', action: 'invalid' }),
+  });
+  assert.equal(response.status, 400);
 
   // Official-style device authorization: start -> browser approve -> poll.
   const verifier = randomBytes(32).toString('base64url');

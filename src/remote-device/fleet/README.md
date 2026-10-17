@@ -1,6 +1,6 @@
 # Local Control MCP device transport
 
-Production product: 0.3.5. Owner-scoped, device-first, private-only. One ChatGPT App; Windows Agent/runtime/user executor are internal.
+Production product: 0.3.6. Owner-scoped, device-first, private-only. One ChatGPT App; Windows Agent/runtime/user executor are internal.
 
 Public catalog: 31 tools. Discovery/status: list_devices, fleet_status, ping, who_am_i. Files: read_file, read_multiple_files, write_file, write_pdf, create_directory, list_directory, move_file, get_file_info, edit_block. Search: start_search, get_more_search_results, stop_search, list_searches. Processes: start_process, read_process_output, interact_with_process, list_sessions, force_terminate, kill_process, list_processes. Config: get_config, set_config_value. Lifecycle: shutdown (Agent only, never OS). Results/history: get_tool_result, list_remote_tool_calls, get_recent_tool_calls. Statistics: get_usage_stats.
 
