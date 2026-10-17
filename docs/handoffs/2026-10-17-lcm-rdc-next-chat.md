@@ -1,8 +1,22 @@
 # LCM / RDC next-chat handoff — 2026-10-17
 
+## 2026-10-18 continuation closeout
+- Accepted starting point was branch `feat/rdc-supervisor-0.3.6`, HEAD `3ca58ecbaa90d24918855641298ff97089e9b79a`; frozen 0.3.5 acceptance was not repeated.
+- Added focused RDC packaging/status-parser coverage and exported the two pure Gateway helpers only for direct regression testing. Implementation/test commit: `3f0bbcc11b0b195bca698e5ab164b7bdff01b6e1`, pushed to `origin/feat/rdc-supervisor-0.3.6`.
+- Build PASS; `test/test-rdc-supervisor.js`, `test/test-fleet-admin-web.js`, and `test/test-fleet-presentation-zh.js` PASS.
+- Live Gateway/Admin was already at `64176962e86afa8b4d06bdf0b38b4ce495b7559e` when this continuation started. It has now been atomically advanced to `3f0bbcc11b0b195bca698e5ab164b7bdff01b6e1` using the canonical transactional control-center deploy path. Post-cutover health PASS: Gateway/Caddy/FRPC active, Owner present, GPT binding active, all three devices online.
+- Windows Agent runtime was intentionally not upgraded: YUAN / HEMA / YUANS remain frozen at `680e0e90b0a44a7c5a6aa08c2ded5314eb992d17` (`device-v1`).
+- RDC supervisor tasks already existed on all three machines before this continuation. Current common state: `DesktopCommanderRemote-<hostname>` Running, enabled, `MSFT_TaskLogonTrigger`, restart count 999, restart interval PT1M, StartWhenAvailable=true, MultipleInstances=IgnoreNew, RDC pinned to 0.3.0, hidden window mode.
+- YUANS canary executed the full action chain over LCM: status -> show -> hide -> disable -> enable -> stop -> start -> restart -> hide. Every action PASS; stop reached Ready/processCount=0; final state restored to Running + hidden + autostart=true.
+- Live LAN Admin POST was then verified end-to-end on exact YUANS (`/admin/api/devices/rdc`, action=status): PASS, Running, autostart=true, hidden, RDC 0.3.0. HEMA and YUAN exact-host `Control-RDC status` also PASS without restarting either machine.
+- Hosted RDC was used minimally after LCM acceptance: one account device-list and one exact YUANS ping. All three hosted devices were Online at RDC 0.3.0 and the YUANS ping succeeded. No `Resource not found` occurred in this continuation.
+- Hosted RDC account telemetry reported only 11% remote calls remaining. Treat RDC hosted quota as a real near-term pressure point; normal-path work should remain on LCM.
+- ChatGPT itself permits the same user account on multiple devices, while model/account usage limits are plan/model/activity dependent. No controlled three-PC simultaneous model-request test was forced because there was no current model-limit error to classify and doing so would consume usage. Therefore a ChatGPT account/model concurrency limit remains possible but is not demonstrated by this continuation.
+- Root `G:\Projects\local-control-mcp` had pre-existing unrelated dirty registration/icon work. It was deliberately not staged, modified, or committed by this continuation.
+
 ## Conversation scope
-- This ChatGPT conversation is an ordinary chat, not visibly bound to a ChatGPT Project container.
-- Operational work is nevertheless scoped to L3 `network.local-control-mcp` and is persisted in Git.
+- The continuation chat is inside the Network L2 ChatGPT Project and is explicitly bound for this task to L3 `network.local-control-mcp`.
+- Exact-host routing remains fail-closed. No unrelated L3 or HEMA Commerce content was touched.
 
 ## Canonical Git state
 - Repo: `G:\Projects\local-control-mcp\local-only\mcp\DesktopCommanderMCP`
@@ -46,16 +60,11 @@
 - Intended model: logon task + restart policy; display/hide changes task window mode and may briefly restart RDC. No new public port/API on the device.
 - Existing LCM User Bridge show/hide controls remain separate.
 
-## What remains before deployment
-1. Review current feature diff for correctness and remove any obsolete duplicate implementation remnants if found.
-2. Add/adjust tests specifically covering RDC control API/status parsing and Windows packaging contract.
-3. Canary on YUANS first; verify:
-   - RDC auto-starts without manual PowerShell launch;
-   - start/stop/restart/show/hide/enable/disable from LCM Admin work;
-   - LCM runtime remains 0.3.5 during canary unless explicitly staging 0.3.6;
-   - RDC device remains the same account/device and no re-login is forced.
-4. Then deploy to HEMA and YUAN, preserving exact-host and HEMA Commerce-only role.
-5. Only after acceptance decide whether to merge/release 0.3.6.
+## Post-acceptance state / remaining decision
+1. Requested RDC three-machine supervisor rollout and Gateway/Admin controls are accepted; do not repeat the YUANS action-chain canary unless a reproducible regression appears.
+2. Gateway/Admin is live at implementation commit `3f0bbcc...`; Windows Agents intentionally remain on the frozen `680e0e90...` runtime. The supervisor does not require an Agent 0.3.6 rollout to function.
+3. The remaining release-management decision is whether/when to merge `feat/rdc-supervisor-0.3.6` into the implementation release branch and label a broader 0.3.6 release. That is separate from the now-working live Gateway/Admin + RDC supervisor path.
+4. Preserve exact-host and HEMA Commerce-only boundaries. Normal remote operations should prefer LCM while hosted RDC quota is low.
 
 ## Fresh-chat rate-limit / connector investigation
 User suspects three PCs + LCM/RDC may be contributing to ChatGPT throttling. Do not assume causality. Separate these layers:
@@ -63,14 +72,14 @@ User suspects three PCs + LCM/RDC may be contributing to ChatGPT throttling. Do 
 - RDC hosted quota / connector limits;
 - LCM self-hosted transport (no RDC hosted quota), while LCM tool calls still occur inside ChatGPT turns;
 - background LCM device heartbeats/Admin polling do not by themselves equal ChatGPT model requests;
-- current long chat intermittently returned RDC connector `Resource not found` while the user could see YUAN RDC online. Treat this as a connector/session-runtime symptom, not proof the device was offline.
+- the prior long chat intermittently returned RDC connector `Resource not found` while the user could see YUAN RDC online. Treat that historical symptom as connector/session-runtime, not proof the device was offline.
 
-Fresh-chat test should be minimal:
-1. Cold-start LCM exact-host ping/start_process on one device.
-2. Cold-start RDC exact device on the same device.
-3. Then one controlled simultaneous test from a second/third PC only if needed.
-4. Record exact UI/error text, timestamp, model, machine, connector, and whether it is model-rate-limit, connector-runtime, or RDC quota.
-5. Avoid broad discovery and repeated retries; user wants low quota usage.
+Continuation result:
+1. LCM exact-host operations were repeatedly successful across YUAN / HEMA / YUANS, including the full YUANS supervisor canary and Gateway Admin dispatch. No self-hosted transport throttle was observed.
+2. Hosted RDC cold discovery + exact YUANS ping succeeded. No `Resource not found` occurred in this continuation.
+3. RDC `who_am_i` reported `remote_calls_left_pct=11`; hosted RDC quota is therefore low enough to be a concrete risk and should not be consumed for normal-path work.
+4. A simultaneous second/third-PC ChatGPT model-request stress test was not forced. If an actual ChatGPT throttle recurs, capture exact UI/error text, timestamp, selected model, machine, and connector before any retry; compare it to the model reset/allowance message rather than attributing it to LCM.
+5. Continue to avoid broad RDC discovery/retries.
 
 ## Do not redo
 - Do not redo 31-tool parity audit.
