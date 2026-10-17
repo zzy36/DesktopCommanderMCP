@@ -54,7 +54,12 @@ try {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Local Control MCP/);
+  assert.match(html, /设备控制中心/);
+  assert.match(html, /class="device-grid"/);
+  assert.match(html, /data-window-mode="hidden"/);
+  assert.match(html, /btn-danger/);
   assert.match(html, /新设备引导/);
+  assert.doesNotMatch(html, /if\(confirm\('切换 /);
   for (const block of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Script(block[1]);
 
   response = await fetch(`${base}/api/status`);
