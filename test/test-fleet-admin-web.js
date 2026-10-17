@@ -66,7 +66,10 @@ try {
   assert.match(html, /data-window-mode="hidden"/);
   assert.match(html, /RDC 备用通道/);
   assert.match(html, /data-rdc-action="restart"/);
-  assert.match(html, /自动启动/);
+  assert.match(html, /自动启动：/);
+  assert.match(html, /已开启/);
+  assert.match(html, /已关闭/);
+  assert.match(html, /autostart-toggle/);
   assert.match(html, /btn-danger/);
   assert.match(html, /新设备引导/);
   assert.doesNotMatch(html, /if\(confirm\('切换 /);
