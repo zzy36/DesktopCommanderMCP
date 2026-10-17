@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+const installer = await readFile(new URL('../deploy/windows/Install-LCMAgent.ps1', import.meta.url), 'utf8');
+const setter = await readFile(new URL('../deploy/windows/Set-LCMBridgeWindowMode.ps1', import.meta.url), 'utf8');
+assert.match(installer, /ValidateSet\('hidden','visible'\)/);
+assert.match(installer, /interactiveWindowMode=\$BridgeWindowMode/);
+assert.match(installer, /-WindowStyle Hidden/);
+assert.match(installer, /BridgeWindowMode='hidden'/);
+assert.match(setter, /LCMInteractiveUser-/);
+assert.match(setter, /Set-ScheduledTask/);
+assert.match(setter, /interactiveWindowMode/);
+assert.match(setter, /Stop-ScheduledTask/);
+assert.match(setter, /Start-ScheduledTask/);
+console.log('LCM bridge window mode packaging PASS');

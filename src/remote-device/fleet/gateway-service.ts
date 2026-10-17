@@ -1,6 +1,6 @@
 import { MAX_FLEET_FRAME_BYTES } from './wire-limits.js';
 import { LocalAdminSecurity } from './local-admin-security.js';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import path from 'node:path';
@@ -59,6 +59,8 @@ export async function startFleetGatewayService(
     const security = adminOrigin ? await LocalAdminSecurity.load(adminOrigin, path.join(config.stateDir, 'admin-key')) : undefined;
     const mcpServer = mcpRuntime.server;
     const agentServer = createAgentHttpServer(config);
+    const bridgeWindowModePath = path.join(config.stateDir, 'bridge-window-modes.json');
+    const bridgeWindowModes = await loadBridgeWindowModes(bridgeWindowModePath);
     const adminServer = config.adminListenPort !== undefined && config.adminListenHost && config.adminBasePath
         ? createFleetAdminHttpServer(gateway, {
             security: security!,
@@ -70,6 +72,19 @@ export async function startFleetGatewayService(
             onRevokeDevice: async (hostname) => {
                 await enrollmentStore.revokeDevice(hostname);
                 gateway.revokeDeviceBinding(hostname);
+            },
+            bridgeWindowModes,
+            onSetBridgeWindowMode: async (hostname, mode) => {
+                const status = gateway.machineDeviceStatus(hostname);
+                if (!status.online) throw new Error(`target ${hostname} is offline`);
+                await gateway.dispatchDevice(hostname, 'start_process', {
+                    command: bridgeWindowModeCommand(mode),
+                    shell: 'powershell.exe',
+                    timeout_ms: 15000,
+                    execution_context: 'system',
+                }, 20000);
+                bridgeWindowModes[hostname.toUpperCase()] = mode;
+                await saveBridgeWindowModes(bridgeWindowModePath, bridgeWindowModes);
             },
             oauthProvider: mcpRuntime.oauthProvider,
         })
@@ -244,4 +259,29 @@ function adaptWebSocket(socket: WebSocket): FleetGatewaySocket {
             socket.on('error', handler);
         },
     };
+}
+
+
+async function loadBridgeWindowModes(filePath: string): Promise<Record<string, 'hidden' | 'visible'>> {
+    try {
+        const parsed = JSON.parse(await readFile(filePath, 'utf8')) as Record<string, unknown>;
+        const result: Record<string, 'hidden' | 'visible'> = {};
+        for (const [hostname, value] of Object.entries(parsed)) {
+            if (value === 'hidden' || value === 'visible') result[hostname.toUpperCase()] = value;
+        }
+        return result;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+        throw error;
+    }
+}
+
+async function saveBridgeWindowModes(filePath: string, modes: Record<string, 'hidden' | 'visible'>): Promise<void> {
+    const temp = `${filePath}.tmp-${process.pid}`;
+    await writeFile(temp, JSON.stringify(modes, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+    await rename(temp, filePath);
+}
+
+function bridgeWindowModeCommand(mode: 'hidden' | 'visible'): string {
+    return "$ErrorActionPreference='Stop'; $runtime=(Get-Content -LiteralPath (Join-Path $env:ProgramData 'LocalControlMCP\\runtime.json') -Raw | ConvertFrom-Json).runtimeRoot; & (Join-Path $runtime 'deploy\\windows\\Set-LCMBridgeWindowMode.ps1') -ExpectedHostname $env:COMPUTERNAME -Mode " + mode;
 }

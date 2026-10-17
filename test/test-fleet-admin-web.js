@@ -17,6 +17,8 @@ const gateway = new FleetGateway({ devices, projects, heartbeatSweepMs: 60_000 }
 const enrollmentStore = new FleetEnrollmentStore(path.join(temp, 'enrollment.json'));
 await enrollmentStore.initialize();
 let approvedDevice = null;
+const bridgeWindowModes = { YUAN: 'hidden' };
+let requestedBridgeWindowMode = null;
 const secret = randomBytes(32).toString('base64url');
 const security = new LocalAdminSecurity('http://127.0.0.1', secret);
 const server = createFleetAdminHttpServer(gateway, {
@@ -26,6 +28,8 @@ const server = createFleetAdminHttpServer(gateway, {
   projects,
   enrollmentStore,
   onApproveDevice: async (device) => { approvedDevice = device; },
+  bridgeWindowModes,
+  onSetBridgeWindowMode: async (hostname, mode) => { requestedBridgeWindowMode = { hostname, mode }; },
 });
 
 try {
@@ -60,6 +64,7 @@ try {
   assert.equal(status.devices.length, 1);
   assert.equal(status.devices[0].hostname, 'YUAN');
   assert.equal(status.devices[0].online, false);
+  assert.equal(status.devices[0].bridgeWindowMode, 'hidden');
   assert.equal('projects' in status, false);
   assert.equal(typeof status.usage?.in_flight, 'number');
   assert.deepEqual(status.recentCalls, []);
@@ -70,7 +75,16 @@ try {
   assert.match(bootstrap.commands.provisionOnly, /Install-LCMAgent\.ps1/);
   assert.match(bootstrap.commands.provisionOnly, /-ProvisionOnly/);
   assert.match(bootstrap.commands.installAndStart, /-InstallTask/);
+  assert.match(bootstrap.commands.installAndStart, /-BridgeWindowMode hidden/);
   assert.match(bootstrap.note, /不会授予业务项目权限/);
+
+  response = await fetch(`${base}/api/devices/window-mode`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ hostname: 'YUAN', mode: 'visible' }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(requestedBridgeWindowMode, { hostname: 'YUAN', mode: 'visible' });
+  assert.equal(bridgeWindowModes.YUAN, 'visible');
 
   // Official-style device authorization: start -> browser approve -> poll.
   const verifier = randomBytes(32).toString('base64url');

@@ -4,6 +4,7 @@ param(
  [Parameter(Mandatory)][string]$ExpectedHostname,
  [string]$GatewayUrl='wss://172.16.1.253:24443/agent',
  [string]$CaBundle=(Join-Path $PSScriptRoot 'network-fleet-ca.crt'),
+ [ValidateSet('hidden','visible')][string]$BridgeWindowMode='hidden',
  [switch]$StageOnly,[switch]$ProvisionOnly,[switch]$InstallTask,[switch]$StartNow
 )
 $ErrorActionPreference='Stop'
@@ -58,7 +59,7 @@ if(Test-Path -LiteralPath (Join-Path $network 'agent.json')){
   Set-Acl -LiteralPath $private -AclObject $acl
  }
  Copy-Item -LiteralPath $CaBundle -Destination (Join-Path $network 'ca.crt')
- $config=[ordered]@{schemaVersion=1;gatewayUrl=$GatewayUrl;hostname=$ExpectedHostname;stateDir=(Join-Path $network 'agent');deviceFirst=$true;interactiveStateDir=$bridge;channel=@{reconnectBaseMs=1000;reconnectMaxMs=30000;heartbeatMs=10000;heartbeatTimeoutMs=90000;callTimeoutMs=55000;maxInFlight=8;completedResultCacheSize=256}}
+ $config=[ordered]@{schemaVersion=1;gatewayUrl=$GatewayUrl;hostname=$ExpectedHostname;stateDir=(Join-Path $network 'agent');deviceFirst=$true;interactiveStateDir=$bridge;interactiveWindowMode=$BridgeWindowMode;channel=@{reconnectBaseMs=1000;reconnectMaxMs=30000;heartbeatMs=10000;heartbeatTimeoutMs=90000;callTimeoutMs=55000;maxInFlight=8;completedResultCacheSize=256}}
  [IO.File]::WriteAllText((Join-Path $network 'agent.json'),($config|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
  [IO.File]::WriteAllText((Join-Path $root 'runtime.json'),(@{schemaVersion=1;runtimeRoot=$runtime;runtimeCommit=$Release;version='0.3.5';presentation='private-cloud-only';deviceFirst=$true}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 }
@@ -76,10 +77,11 @@ if($InstallTask){
  [IO.File]::WriteAllText((Join-Path $bridge 'run-user-bridge.ps1'),$bridgeRunner,[Text.UTF8Encoding]::new($false))
  $settings=New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
  $agentAction=New-ScheduledTaskAction -Execute $pwsh -Argument ('-NoProfile -File "'+(Join-Path $network 'run-agent.ps1')+'"')
- $bridgeAction=New-ScheduledTaskAction -Execute $pwsh -Argument ('-NoProfile -File "'+(Join-Path $bridge 'run-user-bridge.ps1')+'"')
+ $bridgeArgs=if($BridgeWindowMode -eq 'hidden'){'-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $bridge 'run-user-bridge.ps1')+'"'}else{'-NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $bridge 'run-user-bridge.ps1')+'"'}
+ $bridgeAction=New-ScheduledTaskAction -Execute $pwsh -Argument $bridgeArgs
  Register-ScheduledTask -TaskName $agentTask -Action $agentAction -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $settings -Principal (New-ScheduledTaskPrincipal -UserId SYSTEM -LogonType ServiceAccount -RunLevel Highest)|Out-Null
  try{Register-ScheduledTask -TaskName $bridgeTask -Action $bridgeAction -Trigger (New-ScheduledTaskTrigger -AtLogOn -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name)) -Settings $settings -Principal (New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Highest)|Out-Null}
  catch{Unregister-ScheduledTask -TaskName $agentTask -Confirm:$false;throw}
  if($StartNow){Start-ScheduledTask -TaskName $bridgeTask;Start-ScheduledTask -TaskName $agentTask}
 }
-[ordered]@{status='PROVISIONED';hostname=$ExpectedHostname;release=$Release;presentationRegistered=$false;identityCloned=$false}|ConvertTo-Json -Compress
+[ordered]@{status='PROVISIONED';hostname=$ExpectedHostname;release=$Release;bridgeWindowMode=$BridgeWindowMode;presentationRegistered=$false;identityCloned=$false}|ConvertTo-Json -Compress
