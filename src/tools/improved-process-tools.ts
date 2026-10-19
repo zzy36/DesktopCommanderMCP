@@ -1,5 +1,6 @@
 import { terminalManager, MAX_BUFFERED_OUTPUT_CHARS, getProcessWaitLimit } from '../terminal-manager.js';
 import { commandManager } from '../command-manager.js';
+import { authorizeBlockedSshCommand } from '../ssh-command-approval.js';
 import { StartProcessArgsSchema, ReadProcessOutputArgsSchema, InteractWithProcessArgsSchema, ForceTerminateArgsSchema, ListSessionsArgsSchema } from './schemas.js';
 import { capture } from "../utils/capture.js";
 import { ServerResult } from '../types.js';
@@ -165,12 +166,31 @@ export async function startProcess(args: unknown, maxWaitMs: number = MAX_PROCES
     });
   }
 
-  const isAllowed = await commandManager.validateCommand(parsed.data.command);
-  if (!isAllowed) {
+  const ordinaryAllowed = await commandManager.validateCommand(parsed.data.command);
+  // The upstream blocklist parses commands, not SSH remote quoted payloads.
+  // Require explicit approval for remote sudo even if the parser sees only ssh.
+  const remoteSudo = /\bssh(?:\.exe)?\b/i.test(parsed.data.command) && /\bsudo\b/i.test(parsed.data.command);
+  const requiresApproval = !ordinaryAllowed || remoteSudo;
+  // An exception is considered only after the ordinary blocklist or the extra
+  // remote-privilege guard denies. External L1/device policy is unchanged.
+  let approvalConfigHealthy = false;
+  if (requiresApproval && parsed.data.command_approval !== undefined) {
+    try {
+      const current = await configManager.getConfig();
+      approvalConfigHealthy = Array.isArray(current.blockedCommands) &&
+        current.blockedCommands.includes('sudo');
+    } catch { /* config failure must remain fail-closed */ }
+  }
+  const approval = requiresApproval && approvalConfigHealthy
+    ? await authorizeBlockedSshCommand(parsed.data.command, parsed.data.command_approval)
+    : undefined;
+  if ((requiresApproval && !approval?.allowed) ||
+      (!requiresApproval && parsed.data.command_approval !== undefined)) {
     return {
       content: [{ type: "text", text: `Error: Command not allowed: ${parsed.data.command}` }],
       isError: true,
-      structuredContent: { blocked: true, command: parsed.data.command },
+      structuredContent: { blocked: true, command: parsed.data.command,
+        ...(approval ? { approval_reason: approval.reason } : {}) },
     };
   }
 

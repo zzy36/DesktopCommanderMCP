@@ -739,6 +739,10 @@ export const LCM_REMOTE_TOOL_CATALOG: any[] = [
         "verbose_timing": {
           "type": "boolean"
         },
+        "command_approval": {
+          "type": "string",
+          "description": "Optional externally signed, exact-command, one-use SSH authorization. L1 checks still apply."
+        },
         "origin": {
           "type": "string",
           "enum": [
