@@ -108,18 +108,20 @@ $server=Join-Path $runtimeRoot 'dist\remote-device\fleet\local-plugin-main.js'
 $template=Join-Path $runtimeRoot 'deploy\chatgpt-local-plugin\local-control-mcp'
 if(-not(Test-Path -LiteralPath $server)){throw "Local Control MCP runtime is incomplete: $server"}
 if(-not(Test-Path -LiteralPath (Join-Path $template 'plugin.json'))){throw "Local Control MCP plugin template is incomplete: $template"}
-$config=[ordered]@{schema_version=1;device_name=[string]$device[0].device_name;controlRoot=$controlRoot;runtimeRoot=$runtimeRoot;runtimeCommit=$commit;installedAt=(Get-Date).ToString('o')}
+$config=[ordered]@{schema_version=1;device_name=[string]$device[0].device_name;controlRoot=$controlRoot;runtimeRoot=$runtimeRoot;runtimeCommit=$commit;installedAt=(Get-Date).ToString('o');presentation=[string]$spec.presentation}
 if(Test-Path -LiteralPath $runtimeConfig){$saved=Join-Path $sharedRoot ('retired\runtime-config-'+(Get-Date -Format 'yyyyMMddHHmmss')+'.json');New-Item -ItemType Directory -Force -Path (Split-Path $saved -Parent)|Out-Null;Copy-Item -LiteralPath $runtimeConfig -Destination $saved}
 [IO.File]::WriteAllText($runtimeConfig,($config|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
 
 if($RuntimeOnly){
+  $runtimePluginId=$null
+  if(($spec.PSObject.Properties.Name -contains 'marketplace') -and [string]$spec.marketplace){$runtimePluginId='local-control-mcp@'+[string]$spec.marketplace}
   $runtimeOnlyResult=[ordered]@{
     device_name=[string]$device[0].device_name
     control_root=$controlRoot
     runtime_root=$runtimeRoot
     runtime_commit=$commit
     runtime_config=$runtimeConfig
-    plugin_id=('local-control-mcp@'+[string]$spec.marketplace)
+    plugin_id=$runtimePluginId
     plugin_version=[string]$spec.plugin_version
     plugin_touched=$false
     runtime_only=$true
