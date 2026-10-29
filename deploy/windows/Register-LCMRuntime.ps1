@@ -12,6 +12,15 @@ $devices=Get-Content -LiteralPath (Join-Path $controlRoot 'devices.registry.json
 $device=@($devices.devices|Where-Object{([string]$_.device_name).Equals($hostname,[StringComparison]::OrdinalIgnoreCase)-or([string]$_.hostname).Equals($hostname,[StringComparison]::OrdinalIgnoreCase)})
 if($device.Count -ne 1){throw "Current device '$hostname' is not uniquely registered in devices.registry.json."}
 
+$runtimeCommit=[string]$spec.runtime_commit
+$deviceSpec=$device[0]
+if(($deviceSpec.PSObject.Properties.Name -contains 'runtime_overrides') -and $deviceSpec.runtime_overrides -and
+   ($deviceSpec.runtime_overrides.PSObject.Properties.Name -contains 'local_control_mcp') -and $deviceSpec.runtime_overrides.local_control_mcp -and
+   ($deviceSpec.runtime_overrides.local_control_mcp.PSObject.Properties.Name -contains 'runtime_commit') -and
+   [string]$deviceSpec.runtime_overrides.local_control_mcp.runtime_commit){
+  $runtimeCommit=[string]$deviceSpec.runtime_overrides.local_control_mcp.runtime_commit
+}
+
 $programData=[Environment]::GetFolderPath('CommonApplicationData')
 if(-not $programData){$programData=Join-Path ([IO.Path]::GetPathRoot($env:USERPROFILE)) 'ProgramData'}
 $sharedRoot=Join-Path $programData 'LocalControlMCP'
@@ -23,7 +32,7 @@ $marketManifest=Join-Path $marketRoot '.agents\plugins\marketplace.json'
 New-Item -ItemType Directory -Force -Path $sharedRoot,$marketRoot,(Split-Path $marketManifest -Parent),(Split-Path $pluginSource -Parent)|Out-Null
 
 $repo=[string]$spec.runtime_repo
-$commit=([string]$spec.runtime_commit).ToLowerInvariant()
+$commit=$runtimeCommit.ToLowerInvariant()
 $archiveTemplate=[string]$spec.runtime_archive_url
 if($commit -notmatch '^[0-9a-f]{40}$'){throw "Invalid pinned Local Control MCP commit: $commit"}
 $runtimeRoot=Join-Path $sharedRoot ('releases\'+$commit)

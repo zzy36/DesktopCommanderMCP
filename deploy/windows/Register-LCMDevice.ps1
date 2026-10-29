@@ -132,7 +132,7 @@ $runAgent=Join-Path $networkRoot 'run-agent.ps1'
 $runLines=@(
   '$ErrorActionPreference = ''Stop''',
   ('$env:NODE_EXTRA_CA_CERTS = ''{0}''' -f $caTarget.Replace("'","''")),
-  ('$env:LCM_RELEASE = ''{0}''' -f ([string]$spec.runtime_commit)),
+  ('$env:LCM_RELEASE = ''{0}''' -f ([string]$local.runtime_commit)),
   ('& ''{0}'' ''{1}'' --config ''{2}''' -f $node.Replace("'","''"),$agentMain.Replace("'","''"),$agentConfig.Replace("'","''")),
   'exit $LASTEXITCODE'
 )
