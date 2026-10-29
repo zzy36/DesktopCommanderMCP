@@ -29,7 +29,6 @@ export const StartProcessArgsSchema = z.object({
   timeout_ms: z.number(),
   shell: z.string().optional(),
   verbose_timing: z.boolean().optional(),
-  command_approval: z.string().max(4096).optional(), // externally signed exact SSH grant
   // 'ui' marks widget-fired calls (e.g. open-in-folder/editor buttons);
   // excluded from tool-call telemetry (see isUiOriginCall in server.ts).
   origin: z.enum(['ui', 'llm']).optional(),
