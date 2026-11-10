@@ -66,7 +66,9 @@ export async function startFleetGatewayService(
         ? createFleetAdminHttpServer(gateway, {
             security: security!,
             onUpdateCommandPolicy: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE) : undefined,
-            onCommandPolicyStatus: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? host => commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE!,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE!)(host,true) : undefined,
+            onCommandPolicyStatus: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? host => commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE!,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE!)(host,'status') : undefined,
+            onPrepareCommandPolicy: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? host => commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE!,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE!)(host,'prepare') : undefined,
+            onRetryCommandPolicy: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? host => commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE!,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE!)(host,'retry') : undefined,
             release: env.LCM_RELEASE ?? 'development',
             basePath: config.adminBasePath,
             projects: config.projects,

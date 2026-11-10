@@ -11,6 +11,8 @@ try {
  assert(calls.every(c=>c.host==='YUAN'&&c.args.execution_context==='system'));
  assert.deepEqual(calls.map(c=>c.tool),['create_directory','write_file','write_file','start_process']);
  assert.match(calls[3].args.command,/Register-ScheduledTask/);assert(!calls[3].args.command.includes('reboot'));
+ calls.length=0;assert.equal((await update('YUAN','prepare')).status,'prepared');assert.equal(calls.length,3);
+ calls.length=0;await update('YUAN','status');assert.deepEqual(calls.map(c=>c.tool),['read_file','start_process','start_process']);
  calls.length=0;await assert.rejects(commandPolicyMaintenance(gateway,file,'b'.repeat(40))('YUAN'),/mismatch/);assert.equal(calls.length,0);
  gateway.dispatchDevice=async()=>({isError:true});await assert.rejects(update('YUAN'),e=>e.code==='MAINTENANCE_REJECTED');
  console.log('PASS pinned product maintenance: release mismatch rejected, exact target preserved, task scheduling stubbed, no remote commands executed');
