@@ -1,6 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {FleetGateway} from './fleet-gateway.js';
+const diagnosticProcesses = new Map<string,{pid?:number;done:boolean;content:any[]}>();
 
 /** Native gateway administration deploys a pinned product package, not arbitrary commands. */
 export function commandPolicyMaintenance(gateway: FleetGateway, packagePath: string, release: string) {
@@ -20,12 +21,24 @@ export function commandPolicyMaintenance(gateway: FleetGateway, packagePath: str
             return result;
         };
         if (action === 'status') {
+            const runOrRead=async(label:string, command:string)=>{
+                const key=`${hostname}:${release}:${data.installerSha256}:${label}`;
+                const prior=diagnosticProcesses.get(key);
+                if(prior?.done) return {content:prior.content};
+                const result=await gateway.dispatchDevice(hostname,prior?.pid?'read_process_output':'start_process',prior?.pid?{pid:prior.pid,timeout_ms:3000,execution_context:'system'}:{command,shell:'powershell.exe',timeout_ms:3000,execution_context:'system'},15000) as any;
+                const text=(result?.content??[]).map((c:any)=>c.text??'').join('\n');
+                const pid=prior?.pid??Number(text.match(/Process started with PID\s+(\d+)/)?.[1]);
+                const content=[...(prior?.content??[]),...(result?.content??[])];
+                const done=result?.isError===true || /has finished execution|Process completed|Process finished/i.test(text) || !pid;
+                diagnosticProcesses.set(key,{pid,done,content});return {content};
+            };
             const task = `LCMPolicyUpdate-${hostname}-${release.slice(0,12)}`;
             const receipt = await gateway.dispatchDevice(hostname,'read_file',{path:`${root}/policy-${release}.receipt.json`,execution_context:'system'},15000) as any;
-            const taskInfo = await call('start_process',{command:`$s=Get-ScheduledTaskInfo -TaskName '${task}' -ErrorAction SilentlyContinue; if($s){$s|Select-Object LastTaskResult,LastRunTime|ConvertTo-Json -Compress}else{Write-Output 'UPDATE_TASK_ABSENT'}`,shell:'powershell.exe',timeout_ms:3000});
-            const preflight=await gateway.dispatchDevice(hostname,'start_process',{command:`& pwsh -NoProfile -File '${installer}' -PackagePath '${manifest}' -ExpectedHostname '${hostname}' -VerifyOnly`,shell:'powershell.exe',timeout_ms:3000,execution_context:'system'},15000);
+            const taskInfo = await runOrRead('task',`$s=Get-ScheduledTaskInfo -TaskName '${task}' -ErrorAction SilentlyContinue; if($s){$s|Select-Object LastTaskResult,LastRunTime|ConvertTo-Json -Compress}else{Write-Output 'UPDATE_TASK_ABSENT'}`);
+            const preflight=await runOrRead('preflight',`& pwsh -NoProfile -File '${installer}' -PackagePath '${manifest}' -ExpectedHostname '${hostname}' -VerifyOnly`);
             return {hostname,release,receipt,taskInfo,preflight};
         }
+        for(const key of diagnosticProcesses.keys()) if(key.startsWith(hostname+':')) diagnosticProcesses.delete(key);
         await call('create_directory',{path:root});
         await call('write_file',{path:manifest,mode:'rewrite',content:JSON.stringify({schemaVersion:1,policy:data.policy,release:data.release,files:data.files})});
         await call('write_file',{path:installer,mode:'rewrite',content:data.installer});
