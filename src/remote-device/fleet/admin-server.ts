@@ -132,6 +132,30 @@ async function handleRequest(
     if (req.method === 'GET' && url.pathname === `${basePath}/api/status`) {
         return sendJson(res, 200, buildStatus(gateway, options));
     }
+    // Owner maintenance must not require replacing the GPT OAuth binding.
+    // This authenticated, CSRF-protected route accepts no tools or commands.
+    if (req.method === 'POST' && url.pathname === `${basePath}/api/devices/diagnose`) {
+        const body = await readJsonBody(req);
+        if (Object.keys(body).some(key => key !== 'hostname') || typeof body.hostname !== 'string' || !body.hostname.trim()) {
+            return sendJson(res, 400, { error: 'Only an exact hostname is accepted' });
+        }
+        const hostname = body.hostname.trim().toUpperCase();
+        const status = gateway.machineDeviceStatus(hostname);
+        const probe = async (tool: string, args: Record<string, unknown>) => {
+            try {
+                const result = await gateway.dispatchDevice(hostname, tool, args, 15000) as any;
+                return { ok: result?.isError !== true, code: result?.isError ? 'EXECUTOR_REJECTED' : null };
+            } catch (error) {
+                return { ok: false, code: typeof (error as any)?.code === 'string' ? (error as any).code : 'PROBE_FAILED' };
+            }
+        };
+        if (!status.online) return sendJson(res, 200, { hostname, online: false, transport: { ok: false, code: 'TARGET_OFFLINE' } });
+        const transport = await probe('__lcm_ping', {});
+        const system = transport.ok ? await probe('get_config', { execution_context: 'system' }) : null;
+        const interactive = transport.ok ? await probe('get_config', { execution_context: 'interactive' }) : null;
+        return sendJson(res, 200, { hostname, online: true, transport, system, interactive,
+            note: 'Fixed read-only probes. Config values are not returned. Connectivity does not establish target OS permissions.' });
+    }
     if (req.method === 'GET' && url.pathname === `${basePath}/api/calls`) {
         const requested = Number(url.searchParams.get('limit') ?? '20');
         const limit = Number.isFinite(requested) ? Math.max(1, Math.min(100, Math.trunc(requested))) : 20;
