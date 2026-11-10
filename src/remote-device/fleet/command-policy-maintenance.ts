@@ -16,7 +16,7 @@ export function commandPolicyMaintenance(gateway: FleetGateway, packagePath: str
         const installer = `${root}/policy-${release}.ps1`;
         const call = async (tool: string, args: Record<string,unknown>) => {
             const result = await gateway.dispatchDevice(hostname,tool,{...args,execution_context:'system'},60000) as any;
-            if (result?.isError) throw Object.assign(new Error('Device maintenance rejected; no automatic retry'),{code:'MAINTENANCE_REJECTED'});
+            if (result?.isError) throw Object.assign(new Error(`Device maintenance rejected at ${tool}; no automatic retry`),{code:'MAINTENANCE_REJECTED'});
             return result;
         };
         if (action === 'status') {
@@ -27,8 +27,8 @@ export function commandPolicyMaintenance(gateway: FleetGateway, packagePath: str
             return {hostname,release,receipt,taskInfo,preflight};
         }
         await call('create_directory',{path:root});
-        await call('write_file',{path:manifest,content:JSON.stringify({schemaVersion:1,policy:data.policy,release:data.release,files:data.files})});
-        await call('write_file',{path:installer,content:data.installer});
+        await call('write_file',{path:manifest,mode:'rewrite',content:JSON.stringify({schemaVersion:1,policy:data.policy,release:data.release,files:data.files})});
+        await call('write_file',{path:installer,mode:'rewrite',content:data.installer});
         if(action === 'prepare') return {status:'prepared',hostname,release};
         if(action === 'retry' && (status as any).agentVersion === release) throw new Error('Already active; do not retry');
         // A separate scheduled task survives the Agent/Bridge restart. Defer
