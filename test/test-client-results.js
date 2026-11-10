@@ -74,7 +74,7 @@ async function processToolsSendOnlyText(client) {
   assertNothingInternal('start_process', finished);
 
   const blocked = await client.callTool({ name: 'start_process', arguments: { command: 'mkfs', timeout_ms: 1000 } });
-  assert.strictEqual(textOf(blocked), 'Error: Command not allowed: mkfs', 'a blocked command should answer as before');
+  assert.strictEqual(textOf(blocked), 'Error: Command not allowed: mkfs\nThe local executor rejected the request before starting it; this does not establish target-system permissions.');
   assertNothingInternal('start_process (blocked command)', blocked);
 
   const repl = await client.callTool({ name: 'start_process', arguments: { command: 'node -i', timeout_ms: 5000 } });

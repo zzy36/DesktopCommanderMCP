@@ -165,12 +165,12 @@ export async function startProcess(args: unknown, maxWaitMs: number = MAX_PROCES
     });
   }
 
-  const isAllowed = await commandManager.validateCommand(parsed.data.command);
+  const isAllowed = await commandManager.validateCommand(parsed.data.command, parsed.data.shell);
   if (!isAllowed) {
     return {
-      content: [{ type: "text", text: `Error: Command not allowed: ${parsed.data.command}` }],
+      content: [{ type: "text", text: `Error: Command not allowed: ${parsed.data.command}\nThe local executor rejected the request before starting it; this does not establish target-system permissions.` }],
       isError: true,
-      structuredContent: { blocked: true, command: parsed.data.command },
+      structuredContent: { blocked: true, command: parsed.data.command, denial_origin: 'local_command_validation', execution_started: false },
     };
   }
 

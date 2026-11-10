@@ -154,6 +154,9 @@ export function localizeLcmError(error: unknown): string {
     LOCAL_RUNTIME_UNAVAILABLE: '本地运行时不可用。',
     LOCAL_STARTUP_FAILURE: '本地运行时启动失败。',
     LOCAL_TRANSPORT_FAILURE: '本地传输连接失败。',
+    TARGET_OFFLINE: '指定设备当前离线或连接已中断；这不能说明目标系统权限不足。',
+    CALL_TIMEOUT: '设备调用超时，操作结果可能未知；请先回读状态，不要直接重试写入。',
+    EXECUTION_POLICY_UNAVAILABLE: '外部执行策略不可用，操作未获执行许可；这不能说明目标系统权限不足。',
     INTERACTIVE_SESSION_UNAVAILABLE: '当前设备没有可用的已登录用户执行会话；请恢复用户桥接，不会改用 SYSTEM。',
   };
   const detail = error instanceof Error ? error.message : String(error);
