@@ -19,6 +19,7 @@ export interface FleetAdminServerOptions {
     onGetRdcStatuses?: () => Promise<Record<string, RdcStatus>>;
     onControlRdc?: (hostname: string, action: RdcAction) => Promise<RdcStatus>;
     onUpdateCommandPolicy?: (hostname: string) => Promise<unknown>;
+    onCommandPolicyStatus?: (hostname: string) => Promise<unknown>;
     basePath?: string;
     projects: Array<{ projectId: string; hostname: string; policyRevision: string }>;
     enrollmentStore?: FleetEnrollmentStore;
@@ -138,6 +139,12 @@ async function handleRequest(
         const body=await readJsonBody(req);
         if(Object.keys(body).some(key=>key!=='hostname') || typeof body.hostname!=='string' || !body.hostname.trim()) return sendJson(res,400,{error:'Only an exact hostname is accepted'});
         return sendJson(res,202,await options.onUpdateCommandPolicy(body.hostname.trim().toUpperCase()));
+    }
+    if (req.method === 'POST' && url.pathname === `${basePath}/api/devices/command-policy-status`) {
+        if (!options.onCommandPolicyStatus) return sendJson(res,404,{error:'Pinned command policy maintenance is not configured'});
+        const body=await readJsonBody(req);
+        if(Object.keys(body).some(key=>key!=='hostname') || typeof body.hostname!=='string' || !body.hostname.trim()) return sendJson(res,400,{error:'Only an exact hostname is accepted'});
+        return sendJson(res,200,await options.onCommandPolicyStatus(body.hostname.trim().toUpperCase()));
     }
     // Owner maintenance must not require replacing the GPT OAuth binding.
     // This authenticated, CSRF-protected route accepts no tools or commands.

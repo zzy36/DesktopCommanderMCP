@@ -65,7 +65,8 @@ export async function startFleetGatewayService(
     const adminServer = config.adminListenPort !== undefined && config.adminListenHost && config.adminBasePath
         ? createFleetAdminHttpServer(gateway, {
             security: security!,
-            onUpdateCommandPolicy: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE,env.LCM_RELEASE) : undefined,
+            onUpdateCommandPolicy: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE) : undefined,
+            onCommandPolicyStatus: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? host => commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE!,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE!)(host,true) : undefined,
             release: env.LCM_RELEASE ?? 'development',
             basePath: config.adminBasePath,
             projects: config.projects,
@@ -156,14 +157,14 @@ export async function startFleetGatewayService(
         close: async () => {
             if (closed) return;
             closed = true;
+            const serversClosing = Promise.all([closeServer(mcpServer), closeServer(agentServer), adminServer ? closeServer(adminServer) : Promise.resolve()]);
             await gateway.stop().catch(() => undefined);
             for (const client of wss.clients) client.close(1001, 'gateway service stopped');
-            await new Promise<void>((resolve) => wss.close(() => resolve()));
-            await Promise.all([
-                closeServer(mcpServer),
-                closeServer(agentServer),
-                adminServer ? closeServer(adminServer) : Promise.resolve(),
-            ]);
+            await new Promise<void>((resolve) => {
+                const timer = setTimeout(() => { for (const client of wss.clients) client.terminate(); }, 1000);
+                wss.close(() => { clearTimeout(timer); resolve(); });
+            });
+            await serversClosing;
         },
     };
 }
@@ -226,12 +227,14 @@ async function listen(server: Server, port: number, host: string): Promise<void>
     });
 }
 
-async function closeServer(server: Server): Promise<void> {
+export async function closeFleetHttpServer(server: Server, drainMs = 2000): Promise<void> {
     if (!server.listening) return;
     await new Promise<void>((resolve, reject) => {
-        server.close((error) => error ? reject(error) : resolve());
+        const timer=setTimeout(()=>server.closeAllConnections(),drainMs);
+        server.close((error) => { clearTimeout(timer); error ? reject(error) : resolve(); });
     });
 }
+const closeServer = closeFleetHttpServer;
 
 function sendJson(res: ServerResponse, status: number, value: unknown): void {
     const body = JSON.stringify(value);

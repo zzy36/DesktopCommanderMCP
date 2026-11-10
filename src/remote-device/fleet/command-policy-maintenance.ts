@@ -4,7 +4,7 @@ import {FleetGateway} from './fleet-gateway.js';
 
 /** Native gateway administration deploys a pinned product package, not arbitrary commands. */
 export function commandPolicyMaintenance(gateway: FleetGateway, packagePath: string, release: string) {
-    return async (hostname: string) => {
+    return async (hostname: string, statusOnly = false) => {
         const status = gateway.machineDeviceStatus(hostname);
         if (!status.online) throw Object.assign(new Error('Exact device offline'), {code:'TARGET_OFFLINE'});
         const data = JSON.parse(await readFile(packagePath, 'utf8'));
@@ -19,6 +19,12 @@ export function commandPolicyMaintenance(gateway: FleetGateway, packagePath: str
             if (result?.isError) throw Object.assign(new Error('Device maintenance rejected; no automatic retry'),{code:'MAINTENANCE_REJECTED'});
             return result;
         };
+        if (statusOnly) {
+            const task = `LCMPolicyUpdate-${hostname}-${release.slice(0,12)}`;
+            const receipt = await gateway.dispatchDevice(hostname,'read_file',{path:`${root}/policy-${release}.receipt.json`,execution_context:'system'},15000) as any;
+            const taskInfo = await call('start_process',{command:`$s=Get-ScheduledTaskInfo -TaskName '${task}' -ErrorAction SilentlyContinue; if($s){$s|Select-Object LastTaskResult,LastRunTime|ConvertTo-Json -Compress}else{Write-Output 'UPDATE_TASK_ABSENT'}`,shell:'powershell.exe',timeout_ms:3000});
+            return {hostname,release,receipt,taskInfo};
+        }
         await call('create_directory',{path:root});
         await call('write_file',{path:manifest,content:JSON.stringify({schemaVersion:1,policy:data.policy,release:data.release,files:data.files})});
         await call('write_file',{path:installer,content:data.installer});
