@@ -18,6 +18,7 @@ export interface FleetAdminServerOptions {
     onSetBridgeWindowMode?: (hostname: string, mode: BridgeWindowMode) => void | Promise<void>;
     onGetRdcStatuses?: () => Promise<Record<string, RdcStatus>>;
     onControlRdc?: (hostname: string, action: RdcAction) => Promise<RdcStatus>;
+    onUpdateCommandPolicy?: (hostname: string) => Promise<unknown>;
     basePath?: string;
     projects: Array<{ projectId: string; hostname: string; policyRevision: string }>;
     enrollmentStore?: FleetEnrollmentStore;
@@ -132,6 +133,12 @@ async function handleRequest(
     if (req.method === 'GET' && url.pathname === `${basePath}/api/status`) {
         return sendJson(res, 200, buildStatus(gateway, options));
     }
+    if (req.method === 'POST' && url.pathname === `${basePath}/api/devices/update-command-policy`) {
+        if (!options.onUpdateCommandPolicy) return sendJson(res,404,{error:'Pinned command policy maintenance is not configured'});
+        const body=await readJsonBody(req);
+        if(Object.keys(body).some(key=>key!=='hostname') || typeof body.hostname!=='string' || !body.hostname.trim()) return sendJson(res,400,{error:'Only an exact hostname is accepted'});
+        return sendJson(res,202,await options.onUpdateCommandPolicy(body.hostname.trim().toUpperCase()));
+    }
     // Owner maintenance must not require replacing the GPT OAuth binding.
     // This authenticated, CSRF-protected route accepts no tools or commands.
     if (req.method === 'POST' && url.pathname === `${basePath}/api/devices/diagnose`) {
@@ -144,7 +151,15 @@ async function handleRequest(
         const probe = async (tool: string, args: Record<string, unknown>) => {
             try {
                 const result = await gateway.dispatchDevice(hostname, tool, args, 15000) as any;
-                return { ok: result?.isError !== true, code: result?.isError ? 'EXECUTOR_REJECTED' : null };
+                let commandPolicy: string | undefined;
+                if (tool === 'get_config') {
+                    try {
+                        const text = result.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
+                        const mode = JSON.parse(text.replace(/^Current configuration:\s*/, '')).commandExecutionPolicy?.mode;
+                        commandPolicy = mode === 'caller-authorized' || mode === 'legacy-blocklist' ? mode : 'unreported';
+                    } catch { commandPolicy = 'unreported'; }
+                }
+                return { ok: result?.isError !== true, code: result?.isError ? 'EXECUTOR_REJECTED' : null, ...(commandPolicy ? {commandPolicy} : {}) };
             } catch (error) {
                 return { ok: false, code: typeof (error as any)?.code === 'string' ? (error as any).code : 'PROBE_FAILED' };
             }

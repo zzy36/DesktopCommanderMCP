@@ -54,7 +54,7 @@ export async function startInteractiveUserBridge(options: InteractiveUserBridgeO
     }
     const pipe = options.testSocket ?? `\\\\.\\pipe\\lcm-user-${hostname}-${randomBytes(16).toString('hex')}`;
     if (process.platform !== 'win32' && !options.testSocket) throw error('interactive user bridge is Windows-only');
-    const desktop = options.desktop ?? new DesktopCommanderIntegration();
+    const desktop = options.desktop ?? new DesktopCommanderIntegration(options.deviceFirst ? { commandPolicy: 'caller-authorized' } : {});
     const authorizer = options.deviceFirst ? { warmup: async () => {}, stop: async () => {}, authorize: async () => { throw error('Legacy governance transport is retired'); }, authorizeMachine: async () => { throw error('Legacy governance transport is retired'); } } : options.authorizer ?? new ControlPolicyAuthorizer({ controlRoot: options.controlRoot });
     await authorizer.warmup();
     try { await desktop.initialize(); } catch (cause) { await authorizer.stop(); throw cause; }

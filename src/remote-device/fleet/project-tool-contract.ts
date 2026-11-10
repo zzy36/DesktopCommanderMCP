@@ -216,13 +216,14 @@ export class ProjectResourceScope {
   private sanitizeDeviceConfig(result: any, deviceName: string): any {
     const raw = textFromToolResult(result);
     let parsed: any = null;
-    try { parsed = JSON.parse(raw); } catch { /* fallback below */ }
+    try { parsed = JSON.parse(raw.replace(/^Current configuration:\s*/, '')); } catch { /* fallback below */ }
     const source = parsed?.config && typeof parsed.config === 'object' ? parsed.config : parsed;
     const safe = source && typeof source === 'object' ? {
       product: 'Local Control MCP', scope_kind: 'device', device_name: deviceName,
       defaultShell: source.defaultShell,
       fileReadLineLimit: source.fileReadLineLimit, fileWriteLineLimit: source.fileWriteLineLimit,
       telemetryEnabled: source.telemetryEnabled, blockedCommands: source.blockedCommands,
+      commandExecutionPolicy: source.commandExecutionPolicy ? { mode: source.commandExecutionPolicy.mode, legacyBlockedCommandsEnforced: source.commandExecutionPolicy.legacyBlockedCommandsEnforced, osPermissionsUnchanged: source.commandExecutionPolicy.osPermissionsUnchanged } : undefined,
       systemInfo: source.systemInfo ? { platform: source.systemInfo.platform, platformName: source.systemInfo.platformName, isWindows: source.systemInfo.isWindows, isLinux: source.systemInfo.isLinux, isMacOS: source.systemInfo.isMacOS } : undefined,
     } : { product: 'Local Control MCP', scope_kind: 'device', device_name: deviceName };
     return { content: [{ type: 'text', text: JSON.stringify(safe, null, 2) }] };
@@ -231,13 +232,14 @@ export class ProjectResourceScope {
   private sanitizeMachineConfig(result: any, deviceName: string): any {
     const raw = textFromToolResult(result);
     let parsed: any = null;
-    try { parsed = JSON.parse(raw); } catch { /* fallback below */ }
+    try { parsed = JSON.parse(raw.replace(/^Current configuration:\s*/, '')); } catch { /* fallback below */ }
     const source = parsed?.config && typeof parsed.config === 'object' ? parsed.config : parsed;
     const safe = source && typeof source === 'object' ? {
       product: 'Local Control MCP', scope_kind: 'machine_control', device_name: deviceName,
       version: source.version, defaultShell: source.defaultShell,
       fileReadLineLimit: source.fileReadLineLimit, fileWriteLineLimit: source.fileWriteLineLimit,
       telemetryEnabled: source.telemetryEnabled, blockedCommands: source.blockedCommands,
+      commandExecutionPolicy: source.commandExecutionPolicy ? { mode: source.commandExecutionPolicy.mode, legacyBlockedCommandsEnforced: source.commandExecutionPolicy.legacyBlockedCommandsEnforced, osPermissionsUnchanged: source.commandExecutionPolicy.osPermissionsUnchanged } : undefined,
       systemInfo: source.systemInfo ? { platform: source.systemInfo.platform, platformName: source.systemInfo.platformName, isWindows: source.systemInfo.isWindows, isLinux: source.systemInfo.isLinux, isMacOS: source.systemInfo.isMacOS } : undefined,
     } : { product: 'Local Control MCP', scope_kind: 'machine_control', device_name: deviceName };
     return { content: [{ type: 'text', text: JSON.stringify(safe, null, 2) }] };
@@ -246,13 +248,14 @@ export class ProjectResourceScope {
   private sanitizeConfig(projectId: string, auth: ControlProjectAuthorization, result: any, deviceName: string): any {
     const raw = textFromToolResult(result);
     let parsed: any = null;
-    try { parsed = JSON.parse(raw); } catch { /* fallback below */ }
+    try { parsed = JSON.parse(raw.replace(/^Current configuration:\s*/, '')); } catch { /* fallback below */ }
     const source = parsed?.config && typeof parsed.config === 'object' ? parsed.config : parsed;
     const safe = source && typeof source === 'object' ? {
       product: 'Local Control MCP', project_id: projectId, device_name: deviceName, physical_root: auth.physicalRoot,
       version: source.version, defaultShell: source.defaultShell,
       fileReadLineLimit: source.fileReadLineLimit, fileWriteLineLimit: source.fileWriteLineLimit,
       telemetryEnabled: source.telemetryEnabled, blockedCommands: source.blockedCommands,
+      commandExecutionPolicy: source.commandExecutionPolicy ? { mode: source.commandExecutionPolicy.mode, legacyBlockedCommandsEnforced: source.commandExecutionPolicy.legacyBlockedCommandsEnforced, osPermissionsUnchanged: source.commandExecutionPolicy.osPermissionsUnchanged } : undefined,
       systemInfo: source.systemInfo ? {
         platform: source.systemInfo.platform, platformName: source.systemInfo.platformName,
         isWindows: source.systemInfo.isWindows, isLinux: source.systemInfo.isLinux, isMacOS: source.systemInfo.isMacOS,

@@ -1,5 +1,6 @@
 import { MAX_FLEET_FRAME_BYTES } from './wire-limits.js';
 import { LocalAdminSecurity } from './local-admin-security.js';
+import { commandPolicyMaintenance } from './command-policy-maintenance.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -64,6 +65,7 @@ export async function startFleetGatewayService(
     const adminServer = config.adminListenPort !== undefined && config.adminListenHost && config.adminBasePath
         ? createFleetAdminHttpServer(gateway, {
             security: security!,
+            onUpdateCommandPolicy: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE,env.LCM_RELEASE) : undefined,
             release: env.LCM_RELEASE ?? 'development',
             basePath: config.adminBasePath,
             projects: config.projects,

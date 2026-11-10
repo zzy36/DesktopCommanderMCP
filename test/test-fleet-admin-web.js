@@ -33,6 +33,7 @@ const server = createFleetAdminHttpServer(gateway, {
   bridgeWindowModes,
   onSetBridgeWindowMode: async (hostname, mode) => { requestedBridgeWindowMode = { hostname, mode }; },
   onGetRdcStatuses: async () => rdcStatuses,
+  onUpdateCommandPolicy: async hostname => ({status:'scheduled',hostname}),
   onControlRdc: async (hostname, action) => {
     requestedRdcAction = { hostname, action };
     return { ...rdcStatuses[hostname], hostname, state: action === 'stop' ? 'Ready' : 'Running' };
@@ -60,6 +61,11 @@ try {
   assert.equal((await rawFetch(base+'/api/devices/diagnose',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN'})})).status,401);
   assert.equal((await rawFetch(base+'/api/devices/diagnose',{method:'POST',headers:{cookie:session.cookie,origin,'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN'})})).status,403);
   assert.equal((await fetch(base+'/api/devices/diagnose',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN',command:'anything'})})).status,400);
+  assert.equal((await rawFetch(base+'/api/devices/update-command-policy',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN'})})).status,401);
+  assert.equal((await rawFetch(base+'/api/devices/update-command-policy',{method:'POST',headers:{cookie:session.cookie,origin,'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN'})})).status,403);
+  assert.equal((await fetch(base+'/api/devices/update-command-policy',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN',command:'anything'})})).status,400);
+  const policyUpdateResponse=await fetch(base+'/api/devices/update-command-policy',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN'})});
+  assert.equal(policyUpdateResponse.status,202);assert.equal((await policyUpdateResponse.json()).hostname,'YUAN');
   const oldStatus=gateway.machineDeviceStatus.bind(gateway), oldDispatch=gateway.dispatchDevice.bind(gateway);
   gateway.machineDeviceStatus=()=>({online:true});
   const diagnosticCalls=[];

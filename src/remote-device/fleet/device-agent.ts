@@ -10,7 +10,7 @@ import { ResolvedAgentServiceConfig } from './service-config.js';
 
 /** Owner-authenticated device transport; target execution policy is an external hook. */
 export class DeviceAgent {
-    private readonly desktop = new DesktopCommanderIntegration();
+    private readonly desktop = new DesktopCommanderIntegration({ commandPolicy: 'caller-authorized' });
     private channel: FleetChannel | null = null;
     private fingerprint: string | null = null;
     private readonly resources = new ProjectResourceScope();

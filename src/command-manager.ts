@@ -1,6 +1,7 @@
 import path from 'path';
 import {configManager} from './config-manager.js';
 import {capture} from "./utils/capture.js";
+import { usesCallerCommandAuthority } from './lcm-command-policy.js';
 
 class CommandManager {
 
@@ -247,6 +248,9 @@ class CommandManager {
     }
 
     async validateCommand(command: string, shell?: string): Promise<boolean> {
+        // LCM is the Owner's execution transport. The caller grants the action;
+        // inherited DC keywords are not a second authorization authority.
+        if (usesCallerCommandAuthority()) return true;
         try {
             // Get blocked commands from config
             const config = await configManager.getConfig();

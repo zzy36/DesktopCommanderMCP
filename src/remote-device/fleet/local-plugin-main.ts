@@ -72,7 +72,7 @@ function addProjectIdSchema(tool: any): any {
 async function main(): Promise<void> {
   const controlRoot = await resolveControlRoot();
   const authorizer = new ControlPolicyAuthorizer({ controlRoot });
-  const desktop = new DesktopCommanderIntegration();
+  const desktop = new DesktopCommanderIntegration({ commandPolicy: 'caller-authorized' });
   const resources = new ProjectResourceScope();
   await authorizer.warmup();
   await desktop.initialize();

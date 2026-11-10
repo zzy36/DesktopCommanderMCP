@@ -40,6 +40,7 @@ interface McpConfig {
 }
 
 export class DesktopCommanderIntegration {
+    constructor(private readonly options: { commandPolicy?: 'caller-authorized' } = {}) {}
     private mcpClient: Client | null = null;
     private mcpTransport: StdioClientTransport | null = null;
     private isReady: boolean = false;
@@ -107,7 +108,8 @@ export class DesktopCommanderIntegration {
             // welcome page in a browser the remote user would never see.
             this.mcpTransport = new StdioClientTransport({
                 ...config,
-                env: { ...deviceEnvironment(), ...config.env, DC_REMOTE_DEVICE: 'true' }
+                env: { ...deviceEnvironment(), ...config.env, DC_REMOTE_DEVICE: 'true',
+                    LCM_EXECUTOR_COMMAND_POLICY: this.options.commandPolicy ?? 'legacy-blocklist' }
             });
 
             // Create MCP client

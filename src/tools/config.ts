@@ -3,6 +3,7 @@ import { SetConfigValueArgsSchema } from './schemas.js';
 import { getSystemInfo } from '../utils/system-info.js';
 import { detectAvailableShells } from '../utils/shell.js';
 import { currentClient } from '../server.js';
+import { commandPolicyStatus, usesCallerCommandAuthority } from '../lcm-command-policy.js';
 import { featureFlagManager } from '../utils/feature-flags.js';
 import {
   CONFIG_FIELD_DEFINITIONS,
@@ -35,6 +36,7 @@ export async function getConfig() {
     
     const configWithSystemInfo = {
       ...config,
+      commandExecutionPolicy: commandPolicyStatus(),
       currentClient,
       featureFlags: featureFlagManager.getAll(),
       systemInfo: {
@@ -62,7 +64,7 @@ export async function getConfig() {
             key,
             value,
             valueType: definition.valueType,
-            editable: true,
+            editable: !(key === 'blockedCommands' && usesCallerCommandAuthority()),
           };
         }),
       },
@@ -107,6 +109,7 @@ export async function setConfigValue(args: unknown) {
         isError: true
       };
     }
+
 
     try {
       const fieldDefinition = CONFIG_FIELD_DEFINITIONS[parsed.data.key];
