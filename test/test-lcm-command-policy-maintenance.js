@@ -14,6 +14,11 @@ try {
  calls.length=0;assert.equal((await update('YUAN','prepare')).status,'prepared');assert.equal(calls.length,3);
  calls.length=0;await update('YUAN','status');assert.deepEqual(calls.map(c=>c.tool),['read_file','start_process','start_process']);
  calls.length=0;await assert.rejects(commandPolicyMaintenance(gateway,file,'b'.repeat(40))('YUAN'),/mismatch/);assert.equal(calls.length,0);
+ await update('YUAN','prepare');calls.length=0;
+ gateway.dispatchDevice=async(host,tool,args)=>{calls.push({host,tool,args});return {content:[{type:'text',text:tool==='start_process'?'Process started with PID 77\\nProcess is running':tool==='read_process_output'?'Process completed with exit code 0':'STUB_ONLY'}]};};
+ await update('YUAN','status');await update('YUAN','status');
+ assert.equal(calls.filter(c=>c.tool==='start_process').length,2,'pending diagnostics must not be launched twice');
+ assert.equal(calls.filter(c=>c.tool==='read_process_output').length,2,'pending owned process output is read instead');
  gateway.dispatchDevice=async()=>({isError:true});await assert.rejects(update('YUAN'),e=>e.code==='MAINTENANCE_REJECTED');
  console.log('PASS pinned product maintenance: release mismatch rejected, exact target preserved, task scheduling stubbed, no remote commands executed');
 }finally{await fs.rm(root,{recursive:true,force:true})}

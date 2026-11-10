@@ -69,6 +69,7 @@ export async function startFleetGatewayService(
             onCommandPolicyStatus: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? host => commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE!,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE!)(host,'status') : undefined,
             onPrepareCommandPolicy: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? host => commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE!,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE!)(host,'prepare') : undefined,
             onRetryCommandPolicy: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? host => commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE!,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE!)(host,'retry') : undefined,
+            onFinalizeCommandPolicy: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? host => commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE!,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE!)(host,'finalize') : undefined,
             release: env.LCM_RELEASE ?? 'development',
             basePath: config.adminBasePath,
             projects: config.projects,

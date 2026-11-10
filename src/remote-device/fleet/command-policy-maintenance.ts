@@ -5,7 +5,7 @@ const diagnosticProcesses = new Map<string,{pid?:number;done:boolean;content:any
 
 /** Native gateway administration deploys a pinned product package, not arbitrary commands. */
 export function commandPolicyMaintenance(gateway: FleetGateway, packagePath: string, release: string) {
-    return async (hostname: string, action: 'apply' | 'status' | 'prepare' | 'retry' = 'apply') => {
+    return async (hostname: string, action: 'apply' | 'status' | 'prepare' | 'retry' | 'finalize' = 'apply') => {
         const status = gateway.machineDeviceStatus(hostname);
         if (!status.online) throw Object.assign(new Error('Exact device offline'), {code:'TARGET_OFFLINE'});
         const data = JSON.parse(await readFile(packagePath, 'utf8'));
@@ -20,6 +20,13 @@ export function commandPolicyMaintenance(gateway: FleetGateway, packagePath: str
             if (result?.isError) throw Object.assign(new Error(`Device maintenance rejected at ${tool}; no automatic retry`),{code:'MAINTENANCE_REJECTED'});
             return result;
         };
+        if(action === 'finalize') {
+            if((status as any).agentVersion !== release) throw new Error('Installed release has not been accepted');
+            const task=`LCMPolicyUpdate-${hostname}-${release.slice(0,12)}`;
+            const result=await call('start_process',{command:`$ErrorActionPreference='Stop'; $t=Get-ScheduledTask -TaskName '${task}' -ErrorAction SilentlyContinue; if($t){$i=Get-ScheduledTaskInfo -TaskName '${task}'; if([string]$t.State -eq 'Running' -or $i.LastTaskResult -ne 0 -or -not ([string]$t.Actions[0].Arguments).Replace('/','\\').Contains('${installer.replace(/\//g,'\\')}')){throw 'Not an accepted completed update task'}; Unregister-ScheduledTask -TaskName '${task}' -Confirm:$false}; Write-Output 'OWNED_UPDATE_TASK_FINALIZED'`,shell:'powershell.exe',timeout_ms:3000});
+            for(const key of diagnosticProcesses.keys()) if(key.startsWith(hostname+':')) diagnosticProcesses.delete(key);
+            return {status:'finalized',hostname,release,result};
+        }
         if (action === 'status') {
             const runOrRead=async(label:string, command:string)=>{
                 const key=`${hostname}:${release}:${data.installerSha256}:${label}`;
@@ -35,7 +42,7 @@ export function commandPolicyMaintenance(gateway: FleetGateway, packagePath: str
             const task = `LCMPolicyUpdate-${hostname}-${release.slice(0,12)}`;
             const receipt = await gateway.dispatchDevice(hostname,'read_file',{path:`${root}/policy-${release}.receipt.json`,execution_context:'system'},15000) as any;
             const taskInfo = await runOrRead('task',`$s=Get-ScheduledTaskInfo -TaskName '${task}' -ErrorAction SilentlyContinue; if($s){$s|Select-Object LastTaskResult,LastRunTime|ConvertTo-Json -Compress}else{Write-Output 'UPDATE_TASK_ABSENT'}`);
-            const preflight=await runOrRead('preflight',`& pwsh -NoProfile -File '${installer}' -PackagePath '${manifest}' -ExpectedHostname '${hostname}' -VerifyOnly`);
+            const preflight=(status as any).agentVersion === release ? {content:[{type:'text',text:'ALREADY_ACTIVE'}]} : await runOrRead('preflight',`& pwsh -NoProfile -File '${installer}' -PackagePath '${manifest}' -ExpectedHostname '${hostname}' -VerifyOnly`);
             return {hostname,release,receipt,taskInfo,preflight};
         }
         for(const key of diagnosticProcesses.keys()) if(key.startsWith(hostname+':')) diagnosticProcesses.delete(key);

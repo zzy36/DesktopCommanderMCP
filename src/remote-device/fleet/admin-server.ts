@@ -22,6 +22,7 @@ export interface FleetAdminServerOptions {
     onCommandPolicyStatus?: (hostname: string) => Promise<unknown>;
     onPrepareCommandPolicy?: (hostname: string) => Promise<unknown>;
     onRetryCommandPolicy?: (hostname: string) => Promise<unknown>;
+    onFinalizeCommandPolicy?: (hostname: string) => Promise<unknown>;
     basePath?: string;
     projects: Array<{ projectId: string; hostname: string; policyRevision: string }>;
     enrollmentStore?: FleetEnrollmentStore;
@@ -148,8 +149,8 @@ async function handleRequest(
         if(Object.keys(body).some(key=>key!=='hostname') || typeof body.hostname!=='string' || !body.hostname.trim()) return sendJson(res,400,{error:'Only an exact hostname is accepted'});
         return sendJson(res,200,await options.onCommandPolicyStatus(body.hostname.trim().toUpperCase()));
     }
-    if (req.method === 'POST' && [ `${basePath}/api/devices/prepare-command-policy`, `${basePath}/api/devices/retry-command-policy` ].includes(url.pathname)) {
-        const action=url.pathname.endsWith('/prepare-command-policy') ? options.onPrepareCommandPolicy : options.onRetryCommandPolicy;
+    if (req.method === 'POST' && [ `${basePath}/api/devices/prepare-command-policy`, `${basePath}/api/devices/retry-command-policy`, `${basePath}/api/devices/finalize-command-policy` ].includes(url.pathname)) {
+        const action=url.pathname.endsWith('/prepare-command-policy') ? options.onPrepareCommandPolicy : url.pathname.endsWith('/retry-command-policy') ? options.onRetryCommandPolicy : options.onFinalizeCommandPolicy;
         if (!action) return sendJson(res,404,{error:'Pinned command policy maintenance is not configured'});
         const body=await readJsonBody(req);
         if(Object.keys(body).some(key=>key!=='hostname') || typeof body.hostname!=='string' || !body.hostname.trim()) return sendJson(res,400,{error:'Only an exact hostname is accepted'});
