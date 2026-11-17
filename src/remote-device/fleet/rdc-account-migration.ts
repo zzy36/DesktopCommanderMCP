@@ -37,7 +37,7 @@ export class RdcAccountMigration {
             const r=await this.gateway.dispatchDevice(hostname,tool,{...args,execution_context:context},45000) as any;
             if(r?.isError)throw new Error(`RDC migration ${tool} failed in ${context} context`);return r;
         };
-        const command=(mode:'begin'|'status')=>`$ErrorActionPreference='Stop'; $t=$null;$e=$null;$a=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:ProgramData 'NetworkFleet/run-agent.ps1'),[ref]$t,[ref]$e);$n=@($a.FindAll({param($x) $x -is [System.Management.Automation.Language.CommandAst] -and $x.GetCommandName() -match '(^|[\\/])node(\\.exe)?$'},$true)|ForEach-Object{$_.GetCommandName()}|Select-Object -Unique);if($e.Count -or $n.Count -ne 1){throw 'Registered Node executable is ambiguous'};& $n[0] '${helper}' '${mode}' '${config}'`;
+        const command=(mode:'begin'|'status')=>`$ErrorActionPreference='Stop'; $t=$null;$e=$null;$a=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:ProgramData 'NetworkFleet/run-agent.ps1'),[ref]$t,[ref]$e);$n=@($a.FindAll({param($x) $x -is [System.Management.Automation.Language.CommandAst] -and [System.IO.Path]::GetFileName($x.GetCommandName()) -in @('node','node.exe')},$true)|ForEach-Object{$_.GetCommandName()}|Select-Object -Unique);if($e.Count -or $n.Count -ne 1){throw 'Registered Node executable is ambiguous'};& ([string]$n[0]) '${helper}' '${mode}' '${config}'`;
         if(action==='prepare'){
             await call('create_directory',{path:root},'system');
             await call('write_file',{path:helper,mode:'rewrite',content:cfg.helper},'system');
