@@ -82,7 +82,7 @@ async function main(): Promise<void> {
 
   const server = new Server(
     { name: 'local-control-mcp', title: LCM_BRAND_TITLE, icons: LCM_ICONS, version: '0.3.6' },
-    { capabilities: { tools: {} }, instructions: 'Local Control MCP 是自托管项目控制主通道。每次调用必须提供真实 L3 project_id，并由本机 .control 重新授权。此服务不调用托管 RDC。' },
+    { capabilities: { tools: {} }, instructions: '此 stdio 入口执行本机设备操作。当前宿主优先使用覆盖目标和操作的原生能力。仅在选择此入口后，每次调用按现有契约提供真实 L3 project_id，本机 .control 核对授权。保留原错误和句柄，未知写入、身份不符或拒绝不重放。' },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: exposed }));
