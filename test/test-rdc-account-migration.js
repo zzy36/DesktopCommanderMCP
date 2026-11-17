@@ -30,6 +30,16 @@ try{
  const stored=await fs.readFile(path.join(root,'rdc-account-bindings.json'),'utf8');assert(!stored.includes('verificationCiphertext')&&!stored.includes('access_token'));
  assert.equal((await migration.perform('YUAN','health')).cloudState,'online');
  await migration.perform('YUAN','status');assert.equal((await migration.binding('YUAN')).accountStage,'CONNECTED');
+ const runtimeHelper='RUNTIME_TEST',runtimeUserHelper='RUNTIME_USER_TEST';
+ const runtimeConfig=JSON.parse(await fs.readFile(config,'utf8'));Object.assign(runtimeConfig,{runtimeVersion:'0.3.3',archiveSha256:'b'.repeat(64),runtimeHelper,runtimeHelperSha256:createHash('sha256').update(runtimeHelper).digest('hex'),runtimeUserHelper,runtimeUserHelperSha256:createHash('sha256').update(runtimeUserHelper).digest('hex')});await fs.writeFile(config,JSON.stringify(runtimeConfig));
+ let compatible=false;const runtimeCalls=[];
+ const runtime=new RdcAccountMigration({...gateway,dispatchDevice:async(host,tool,args)=>{runtimeCalls.push({tool,args});return {content:[{type:'text',text:JSON.stringify(args.command?.includes('check-user.mjs')?{hostname:host,accountMatches:true,deviceIdentityUnchanged:true,sessionCompatible:compatible}:{hostname:host,runtimeStage:'ACTIVATED'})}]};}},config,root,async()=>{throw Error('Must not stop RDC while staging')});
+ await runtime.perform('YUAN','runtime-prepare');await runtime.perform('YUAN','runtime-stage');
+ await assert.rejects(runtime.perform('YUAN','runtime-activate'),/preflight did not pass/);
+ assert(!runtimeCalls.some(c=>c.args.command?.includes("-Action 'activate'")));
+ compatible=true;assert.equal((await runtime.perform('YUAN','runtime-activate')).runtimeStage,'ACTIVATED');
+ assert(runtimeCalls.filter(c=>c.args.command?.includes('check-user.mjs')).every(c=>c.args.execution_context==='interactive'));
+ assert(runtimeCalls.filter(c=>c.args.command?.includes('Update-RDCRuntime.ps1')).every(c=>c.args.execution_context==='system'));
  console.log('PASS RDC migration: exact device, user context, verified-account gate, gateway sync, no credentials in gateway state');
 }finally{await fs.rm(root,{recursive:true,force:true});}
 

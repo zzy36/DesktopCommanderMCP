@@ -1,8 +1,9 @@
+import {createReadStream} from 'node:fs';
 import { MAX_FLEET_FRAME_BYTES } from './wire-limits.js';
 import { LocalAdminSecurity } from './local-admin-security.js';
 import { commandPolicyMaintenance } from './command-policy-maintenance.js';
 import {RdcAccountMigration} from './rdc-account-migration.js';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile, stat } from 'node:fs/promises';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import path from 'node:path';
@@ -60,7 +61,7 @@ export async function startFleetGatewayService(
     if (config.adminListenPort !== undefined && !adminOrigin) throw new Error('admin.origin is required');
     const security = adminOrigin ? await LocalAdminSecurity.load(adminOrigin, path.join(config.stateDir, 'admin-key')) : undefined;
     const mcpServer = mcpRuntime.server;
-    const agentServer = createAgentHttpServer(config);
+    const agentServer = createAgentHttpServer(config,env);
     const bridgeWindowModePath = path.join(config.stateDir, 'bridge-window-modes.json');
     const bridgeWindowModes = await loadBridgeWindowModes(bridgeWindowModePath);
     const rdcAccounts=env.LCM_RDC_ACCOUNT_PACKAGE ? new RdcAccountMigration(gateway,env.LCM_RDC_ACCOUNT_PACKAGE,config.stateDir,(host,action)=>controlRdc(gateway,host,action)) : undefined;
@@ -74,6 +75,7 @@ export async function startFleetGatewayService(
     const adminServer = config.adminListenPort !== undefined && config.adminListenHost && config.adminBasePath
         ? createFleetAdminHttpServer(gateway, {
             security: security!,
+            bootstrapKitPath:env.LCM_DEVICE_KIT_ARCHIVE,
             onUpdateCommandPolicy: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE) : undefined,
             onCommandPolicyStatus: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? host => commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE!,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE!)(host,'status') : undefined,
             onPrepareCommandPolicy: env.LCM_COMMAND_POLICY_PACKAGE && env.LCM_RELEASE ? host => commandPolicyMaintenance(gateway,env.LCM_COMMAND_POLICY_PACKAGE!,env.LCM_COMMAND_POLICY_PACKAGE_RELEASE ?? env.LCM_RELEASE!)(host,'prepare') : undefined,
@@ -209,9 +211,12 @@ function createMcpServer(
     }), oauthProvider: provider };
 }
 
-function createAgentHttpServer(config: ResolvedGatewayServiceConfig): Server {
-    return createServer((req, res) => {
+export function createAgentHttpServer(config: ResolvedGatewayServiceConfig,env:NodeJS.ProcessEnv=process.env): Server {
+    return createServer(async(req, res) => {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+        if(req.method==='GET'&&url.pathname==='/artifacts/rdc-0.3.3.zip'&&env.LCM_RDC_RUNTIME_ARCHIVE){
+            try{const file=env.LCM_RDC_RUNTIME_ARCHIVE;const info=await stat(file);res.writeHead(200,{'content-type':'application/zip','content-length':info.size,'cache-control':'private, max-age=3600','x-content-type-options':'nosniff'});const stream=createReadStream(file);stream.on('error',()=>res.destroy());stream.pipe(res);}catch{sendJson(res,404,{error:'Artifact not staged'});}return;
+        }
         if (req.method === 'GET' && url.pathname === '/healthz') {
             sendJson(res, 200, { ok: true, service: 'network-fleet-agent-ingress' });
             return;

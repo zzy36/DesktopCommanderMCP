@@ -6,7 +6,7 @@ fleet-mcp.home.arpa:24443 {
     tls /etc/network-fleet/tls/fullchain.pem /etc/network-fleet/tls/privkey.pem
 
     @agent {
-        path /agent
+        path /agent /artifacts/rdc-0.3.3.zip
         remote_ip 172.16.0.0/20
     }
     reverse_proxy @agent 127.0.0.1:24788

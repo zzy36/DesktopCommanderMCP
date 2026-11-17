@@ -4,8 +4,8 @@ import path from 'node:path';
 import {FleetGateway} from './fleet-gateway.js';
 import type {RdcAction,RdcStatus} from './admin-server.js';
 
-type Action='prepare'|'begin'|'status'|'finish'|'health';
-const actions=new Set(['prepare','begin','status','finish','health']);
+type Action='prepare'|'begin'|'status'|'finish'|'health'|'runtime-prepare'|'runtime-stage'|'runtime-status'|'runtime-activate'|'runtime-check'|'runtime-rollback';
+const actions=new Set(['prepare','begin','status','finish','health','runtime-prepare','runtime-stage','runtime-status','runtime-activate','runtime-check','runtime-rollback']);
 const stages=new Set(['PREPARING','NOT_STARTED','AWAITING_BROWSER','SAVING','PAIRED','FAILED']);
 export class RdcAccountMigration {
     private pending=new Map<string,{pid:number;content:any[]}>();
@@ -28,7 +28,7 @@ export class RdcAccountMigration {
             d.devices[hostname]=data;const temp=file+'.stage';await writeFile(temp,JSON.stringify(d),{mode:0o600});await rename(temp,file);
         });return this.writing;
     }
-    async perform(hostname:string,action:Action){
+    async perform(hostname:string,action:Action):Promise<any>{
         if(!actions.has(action)||!/^[A-Z0-9-]+$/.test(hostname))throw new Error('Exact hostname and fixed RDC migration action required');
         if(!this.gateway.machineDeviceStatus(hostname).online)throw Object.assign(new Error('Exact LCM device offline'),{code:'TARGET_OFFLINE'});
         const cfg=await this.config();
@@ -50,9 +50,39 @@ export class RdcAccountMigration {
             const r=await call('start_process',{command:command('health'),shell:'powershell.exe',timeout_ms:15000});
             const text=(r.content??[]).map((c:any)=>c.text??'').join('\n');
             for(const line of text.split(/\r?\n/).reverse()){
-                try{const d=JSON.parse(line.trim());if(d.hostname===hostname&&['online','offline','unknown','signed-out','account-mismatch'].includes(d.cloudState))return {hostname,cloudState:d.cloudState,cloudReason:d.cloudReason,cloudCheckedAt:d.cloudCheckedAt,cloudLastSeenAt:d.cloudLastSeenAt};}catch{}
+                try{const d=JSON.parse(line.trim());if(d.hostname===hostname&&['online','offline','unknown','signed-out','account-mismatch'].includes(d.cloudState))return {hostname,cloudState:d.cloudState,cloudReason:d.cloudReason,cloudCheckedAt:d.cloudCheckedAt,cloudLastSeenAt:d.cloudLastSeenAt,cloudVersion:d.cloudVersion};}catch{}
             }
             return {hostname,cloudState:'unknown',cloudReason:'STATUS_RESPONSE_UNAVAILABLE',cloudCheckedAt:new Date().toISOString()};
+        }
+        if(action.startsWith('runtime-')){
+            if(cfg.runtimeVersion!=='0.3.3'||!/^[a-f0-9]{64}$/.test(cfg.archiveSha256)||createHash('sha256').update(cfg.runtimeHelper??'').digest('hex')!==cfg.runtimeHelperSha256||createHash('sha256').update(cfg.runtimeUserHelper??'').digest('hex')!==cfg.runtimeUserHelperSha256)throw new Error('Pinned RDC runtime maintenance package invalid');
+            const directory='C:/ProgramData/LocalControlMCP-RDC/runtime-upgrade/0.3.3';
+            const runtimeConfig=directory+'/config.json';
+            if(action==='runtime-prepare'){
+                await call('create_directory',{path:directory},'system');
+                await call('write_file',{path:directory+'/Update-RDCRuntime.ps1',mode:'rewrite',content:cfg.runtimeHelper},'system');
+                await call('write_file',{path:directory+'/check-user.mjs',mode:'rewrite',content:cfg.runtimeUserHelper},'system');
+                await call('write_file',{path:runtimeConfig,mode:'rewrite',content:JSON.stringify({hostname,runtimeVersion:'0.3.3',archiveUrl:cfg.archiveUrl,archiveSha256:cfg.archiveSha256,targetEmailSha256:cfg.targetEmailSha256})},'system');
+                return {hostname,runtimeStage:'PREPARED'};
+            }
+            const parse=(r:any,field:string)=>{
+                for(const line of (r.content??[]).map((c:any)=>c.text??'').join('\n').split(/\r?\n/).reverse()){
+                    try{const d=JSON.parse(line.trim());if(d.hostname===hostname&&field in d)return d;}catch{}
+                }
+                throw new Error('RDC runtime maintenance response unavailable; read original receipt');
+            };
+            const userCheck=async()=>{
+                const bootstrap=command('status').split(';& ([string]$n[0])')[0];
+                const checked=parse(await call('start_process',{command:bootstrap+`; & ([string]$n[0]) '${directory}/check-user.mjs' '${runtimeConfig}'`,shell:'powershell.exe',timeout_ms:15000}),'accountMatches');
+                if(!checked.accountMatches||!checked.deviceIdentityUnchanged||!checked.sessionCompatible)throw new Error('RDC account/device/session preflight did not pass; running runtime retained');
+                return checked;
+            };
+            if(action==='runtime-check')return {...await userCheck(),...await this.perform(hostname,'health')};
+            if(action==='runtime-activate')await userCheck();
+            const verb=action.slice('runtime-'.length);
+            const r=await call('start_process',{command:`& 'C:/Program Files/PowerShell/7/pwsh.exe' -NoProfile -ExecutionPolicy Bypass -File '${directory}/Update-RDCRuntime.ps1' -Config '${runtimeConfig}' -Action '${verb}'`,shell:'powershell.exe',timeout_ms:verb==='stage'?1000:15000},'system');
+            if(verb==='stage')return {hostname,runtimeStage:'STAGE_DISPATCHED'};
+            return parse(r,'runtimeStage');
         }
         const readStatus=async()=>{
             const pending=this.pending.get(hostname);

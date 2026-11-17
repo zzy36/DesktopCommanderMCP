@@ -3,7 +3,7 @@ import { adminSession } from './fleet-admin-session.js';
 import { Script } from 'node:vm';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createFleetAdminHttpServer } from '../dist/remote-device/fleet/admin-server.js';
@@ -21,10 +21,12 @@ const bridgeWindowModes = { YUAN: 'hidden' };
 let requestedBridgeWindowMode = null;
 let requestedRdcAction = null;
 const rdcStatuses = { YUAN: { hostname: 'YUAN', state: 'Running', enabled: true, autostart: true, windowMode: 'hidden', rdcVersion: '0.3.0', processCount: 1, pids: [4321] } };
+const installerKit=path.join(temp,'kit.zip');await writeFile(installerKit,'PUBLIC_KIT_TEST');
 const secret = randomBytes(32).toString('base64url');
 const security = new LocalAdminSecurity('http://127.0.0.1', secret);
 const server = createFleetAdminHttpServer(gateway, {
   security,
+  bootstrapKitPath:installerKit,
   basePath: '/admin',
   devices,
   projects,
@@ -102,6 +104,13 @@ try {
   assert.match(html, /autostart-toggle/);
   assert.match(html, /btn-danger/);
   assert.match(html, /新设备引导/);
+  assert.match(html, /Start-LCMRemote.cmd/);
+  assert.match(html, /下载 Windows 安装包/);
+  assert.doesNotMatch(html, /<code>lcm remote<\/code>/);
+  assert.equal((await rawFetch(base+'/api/bootstrap/kit')).status,401);
+  const kit=await fetch(base+'/api/bootstrap/kit');assert.equal(kit.status,200);assert.equal(await kit.text(),'PUBLIC_KIT_TEST');
+  assert.match(html, /Start-LCMRemote.cmd/);
+  assert.doesNotMatch(html, /<code>lcm remote<\/code>/);
   assert.doesNotMatch(html, /if\(confirm\('切换 /);
   for (const block of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Script(block[1]);
 
