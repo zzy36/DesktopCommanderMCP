@@ -20,6 +20,10 @@ try{
  }
  await migration.perform('YUAN','begin');assert.equal(controls[0].action,'stop');assert(calls.filter(c=>c.tool==='start_process').every(c=>c.args.execution_context==='interactive'));
  await assert.rejects(migration.perform('YUAN','finish'),/not been verified/);assert(!controls.some(c=>c.action==='start'));
+ const retryControls=[];let retrySafe=false;
+ const failed=new RdcAccountMigration({...gateway,dispatchDevice:async(host,tool,args)=>({content:[{type:'text',text:JSON.stringify({hostname:host,stage:'FAILED',diagnostics:{preparationRetrySafe:retrySafe}})}]})},config,root,async(host,action)=>{retryControls.push(action);return {state:'Ready',processCount:0}});
+ await assert.rejects(failed.perform('YUAN','begin'),/Previous RDC migration failed/);assert.equal(retryControls.length,0);
+ retrySafe=true;assert.equal((await failed.perform('YUAN','begin')).stage,'STARTED');assert.deepEqual(retryControls,['stop']);
  accountMatches=true;const result=await migration.perform('YUAN','finish');assert.equal(result.stage,'CONNECTED');
  assert.equal((await migration.binding('YUAN')).accountMatches,true);
  const stored=await fs.readFile(path.join(root,'rdc-account-bindings.json'),'utf8');assert(!stored.includes('verificationCiphertext')&&!stored.includes('access_token'));

@@ -59,7 +59,7 @@ export class RdcAccountMigration {
         const s=await readStatus();
         if(action==='begin'){
             if(s.stage==='STATUS_PENDING'||s.stage==='AWAITING_BROWSER'||s.savedAccountMatches)return s;
-            if(s.stage==='FAILED')throw new Error('Previous RDC migration failed; inspect local state before restarting');
+            if(s.stage==='FAILED'&&s.diagnostics?.preparationRetrySafe!==true)throw new Error('Previous RDC migration failed; inspect local state before restarting');
             const stopped=await this.control(hostname,'stop');
             if(stopped.state==='Running'||(stopped.processCount??0)>0)throw new Error('RDC has not stopped; read back before authorization');
             await call('start_process',{command:command('begin'),shell:'powershell.exe',timeout_ms:1000});
