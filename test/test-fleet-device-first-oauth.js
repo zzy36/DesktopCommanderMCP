@@ -127,6 +127,9 @@ try {
   const registration = await registerClient();
   const full = await authorize(registration, ['fleet:read', 'fleet:write', 'offline_access']);
   fullClient = await connect(full.access_token);
+  assert.match(fullClient.getInstructions(), /First use the current host.*native capability/);
+  assert.match(fullClient.getInstructions(), /Only after LCM is selected/);
+  assert.match(fullClient.getInstructions(), /refusals, identity mismatches or UNKNOWN/);
   const listed = await fullClient.listTools();
   assert.equal(listed.tools.length, 31);
   assert.equal(new Set(listed.tools.map((tool) => tool.name)).size, 31);
@@ -149,6 +152,7 @@ try {
     requestInit: { headers: { authorization: `Bearer ${full.access_token}` } },
   }));
   assert.equal(modernClient.getProtocolEra(), 'modern');
+  assert.match(modernClient.getInstructions(), /Only after LCM is selected/);
   assert.equal(modernClient.getNegotiatedProtocolVersion(), '2026-07-28');
   assert.equal((await modernClient.listTools()).tools.length, 31);
   const modernPing = await modernClient.callTool({ name: 'ping', arguments: { hostname: 'HEMA' } });

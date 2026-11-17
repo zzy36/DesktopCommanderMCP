@@ -1,20 +1,16 @@
 ---
 name: local-control-mcp-default
-description: 用于明确 MCP 或远程设备操作。Codex 本机默认原生工具；远程 LCM 优先，同 D0 RDC 故障修复备用，恢复后回切。
+description: 已明确的设备操作先核当前宿主原生能力及准确目标可达性；缺能力或不可达才用已授权 LCM，真实 LCM 技术故障才同 D0 RDC。
 ---
 
-# Local Control MCP
+# Local Control MCP 通道
 
-Codex 当前宿主的文件、搜索、终端、编辑、构建、测试、浏览器和技能默认使用原生能力。本技能只选择远程传输，不接管本机工具。普通 ChatGPT 需要机器控制时优先 LCM。
+ChatGPT、Codex、Cloud、Dot 默认使用当前宿主实际支持且覆盖准确目标与操作的原生能力；跨电脑先核受支持、可达的原生远端。缺所需能力或不能到准确目标才选择已授权 LCM。普通聊天可由 LCM/RDC 补足设备能力；不为检查连接先调用 LCM，不新增模型回合或更换主会话。
 
-LCM 是 Owner 范围的设备传输。list_devices 不需要项目参数，执行选择准确已登记 hostname；公共工具不使用 project_id、scope_kind 或 machine_approval。项目/root/writer/lease 判断由调用界面和目标机外部治理负责，必要上下文通过 MCP _meta 传递，不借业务项目维护机器。事实以目标 AGENTS/CURRENT/HANDOFF 与 Git 为准。
+选定 LCM 后，已知准确已登记 hostname 就直接目标调用，只有需要发现设备才 list_devices。Owner 身份、认证、准确设备与 OS 权限保留；App/MCP/API 和现有普通聊天命令不退役。项目/root/writer/lease 与长期记忆属于现有 L1 .control 和原 L3，按登记的短入口读取，不由传输重建。
 
-LCM 无托管额度成本，默认优先；RDC 有额度成本，是保留的备用通道。发现 LCM runtime/startup/transport、UI/管理入口、Computer Use 或 Cloud/private discovery 阻塞时，直接使用同作用域、同 D0 RDC 诊断、修复、部署、验证 LCM，不重复请示、不增加重试门槛。单个 UI gate 不阻断其他独立工作。
+仅真实 LCM 运行、启动、传输、管理/GUI、Computer Use 或 Cloud/discovery 技术故障可同 D0、同范围 RDC 回退。拒绝、身份不符或 UNKNOWN 不重放，不换机绕过。进程和异步结果只跟进原 PID/call_id；不重复未知动作。RDC 保留安装、账号与自启。
 
-回退不粘滞：后续普通操作轻量探测其实际所需的 LCM 能力，健康即回切。Agent 在线不等于当前所需能力或 Cloud schema 已恢复。不重放结果不明确的写操作。保留 RDC，不卸载或禁用。
+登录用户的 Git、浏览器和 GUI 使用准确 D0 的 interactive，不复制凭据到 SYSTEM，也不自动降级。Agent 在线不证明每项能力或 Cloud 入口正常。保留原 owner、Goal、writer、租约和全部 WIP；生产变更遵原授权门槛。
 
-不得伪造 URL、身份或跨错设备/项目；授权拒绝本身不授予新权限。修复自有 LCM 仍遵守正常写入/lease/备份边界；破坏数据、新的未授权跨界写入、重建 OAuth/身份、不可逆删除才暂停确认。安全检查失败可以换合法工具/入口，不能绕过检查。
-
-远程用户 Git 凭据、GUI、浏览器和用户环境使用准确 D0 的 execution_context: interactive；不复制凭据到 SYSTEM，不把用户会话缺失悄悄降级到 SYSTEM。后台工作可用 system，进程后续调用保持原执行上下文。网页/手机/iPad 优先已有自托管 Secure MCP。
-
-ChatGPT 只保留一个私人 LCM App。Agent/runtime/用户执行器是内部组件；设备先独立登记到 Owner，之后再由外部治理分配项目角色。
+LCM 本地使用统计不等于模型 token 或平台收费。OBS6 在知识库语境指 Obsidian；SQL/数据库业务按原 L3 的真实任务保留，不据近音新增安装或打包。
