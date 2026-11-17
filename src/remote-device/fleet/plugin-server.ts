@@ -100,83 +100,94 @@ function toolError(error: unknown) {
     return { content: [{ type: 'text' as const, text: `${code}${message}` }], isError: true };
 }
 
+export const FLEET_SERVER_INFO = { name: 'local-control-mcp-remote', title: LCM_BRAND_TITLE, icons: LCM_ICONS, version: '0.3.6' };
+export const FLEET_SERVER_OPTIONS = { capabilities: { tools: {} }, instructions: 'Local Control MCP is an Owner-scoped device transport. If the exact hostname is already known from the current task, call the target tool directly: do not preflight list_devices, fleet_status, or ping. Use list_devices only when device discovery is actually needed. Select the exact enrolled hostname for execution; never redirect an offline device. Target governance is external and must be resolved before transport selection. Reuse the already-resolved exact D0 for the current task unless the user changes target or a real routing error occurs. Use interactive for logged-in user tools; never downgrade to SYSTEM. Do not replay uncertain writes.' };
+
 export function createFleetPluginMcpServer(
     backend: FleetPluginBackend,
     options: FleetPluginMcpOptions = {},
 ): McpProtocolServer {
-    const enforceScopes = options.enforceOAuthScopes === true;
     const server = new McpProtocolServer(
-        { name: 'local-control-mcp-remote', title: LCM_BRAND_TITLE, icons: LCM_ICONS, version: '0.3.6' },
-        { capabilities: { tools: {} }, instructions: 'Local Control MCP is an Owner-scoped device transport. If the exact hostname is already known from the current task, call the target tool directly: do not preflight list_devices, fleet_status, or ping. Use list_devices only when device discovery is actually needed. Select the exact enrolled hostname for execution; never redirect an offline device. Target governance is external and must be resolved before transport selection. Reuse the already-resolved exact D0 for the current task unless the user changes target or a real routing error occurs. Use interactive for logged-in user tools; never downgrade to SYSTEM. Do not replay uncertain writes.' },
+        FLEET_SERVER_INFO,
+        FLEET_SERVER_OPTIONS,
     );
 
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: [...FLEET_CONTROL_TOOLS, ...LCM_REMOTE_TOOL_CATALOG].map(localizeLcmTool).map(tool => ({ ...tool, icons: LCM_ICONS })),
-    }));
-
-    server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-        const toolName = request.params.name;
-        const args = request.params.arguments && typeof request.params.arguments === 'object'
-            ? request.params.arguments as Record<string, unknown> : {};
-        try {
-            if (toolName === 'fleet_status') {
-                requireScope(extra, 'fleet:read', enforceScopes);
-                const projectId = '';
-                const hostname = requiredString(args, 'hostname');
-                return jsonResult(await backend.fleetStatus(projectId, hostname));
-            }
-            if (toolName === 'list_devices') {
-                requireScope(extra, 'fleet:read', enforceScopes);
-                const projectId = '';
-                return jsonResult({ devices: await backend.listDevices(projectId) });
-            }
-            if (toolName === 'ping') {
-                requireScope(extra, 'fleet:read', enforceScopes);
-                return jsonResult(await backend.ping('', requiredString(args, 'hostname')));
-            }
-            if (toolName === 'who_am_i') {
-                requireScope(extra, 'fleet:read', enforceScopes);
-                return jsonResult(await backend.whoAmI());
-            }
-            if (toolName === 'get_tool_result') {
-                requireScope(extra, 'fleet:read', enforceScopes);
-                return jsonResult(await backend.getToolResult(
-                    '',
-                    typeof args.hostname === 'string' ? args.hostname : '',
-                    requiredString(args, 'call_id'),
-                ));
-            }
-            if (toolName === 'list_remote_tool_calls') {
-                requireScope(extra, 'fleet:read', enforceScopes);
-                const projectId = '';
-                const hostname = typeof args.hostname === 'string' && args.hostname.trim() ? args.hostname.trim() : undefined;
-                const limit = typeof args.limit === 'number' && Number.isInteger(args.limit) ? args.limit : 20;
-                return jsonResult({ calls: await backend.listRemoteToolCalls(projectId, hostname, limit) });
-            }
-
-            if (toolName === 'get_usage_stats') {
-                requireScope(extra, 'fleet:read', enforceScopes);
-                return jsonResult(await backend.usageStats?.() ?? {});
-            }
-            const definition = REMOTE_BY_NAME.get(toolName);
-            if (!definition) return toolError(Object.assign(new Error(`Unknown LCM tool: ${toolName}`), { code: 'INVALID_TOOL' }));
-            requireScope(extra, definition.annotations?.readOnlyHint === true ? 'fleet:read' : 'fleet:write', enforceScopes);
-            const hostname = requiredString(args, 'hostname');
-            const forwarded = { ...args };
-            delete forwarded.hostname;
-            // Public device-first tools never accept legacy governance arguments.
-            // Governance context, when present, is opaque MCP metadata only.
-            delete forwarded.project_id; delete forwarded.scope_kind; delete forwarded.machine_approval;
-            if (request.params._meta) forwarded._lcm_context = request.params._meta;
-            if (backend.callDeviceTool) return await backend.callDeviceTool(hostname, toolName, forwarded) as any;
-            return await backend.callMachineTool(hostname, toolName, forwarded, true) as any;
-
-        } catch (error) {
-            return toolError(error);
-        }
-    });
-
+    server.setRequestHandler(ListToolsRequestSchema, listFleetTools);
+    server.setRequestHandler(CallToolRequestSchema, (request, extra) => callFleetTool(backend, options, request, extra));
     return server;
+}
+
+export function listFleetTools() {
+    return ({
+        tools: [...FLEET_CONTROL_TOOLS, ...LCM_REMOTE_TOOL_CATALOG].map(localizeLcmTool).map(tool => ({ ...tool, icons: LCM_ICONS })),
+    });
+}
+
+export async function callFleetTool(
+    backend: FleetPluginBackend, options: FleetPluginMcpOptions,
+    request: { params: { name: string; arguments?: Record<string, unknown>; _meta?: unknown } },
+    extra: { authInfo?: { scopes?: string[] } },
+) {
+    const enforceScopes = options.enforceOAuthScopes === true;
+    const toolName = request.params.name;
+    const args = request.params.arguments && typeof request.params.arguments === 'object'
+        ? request.params.arguments as Record<string, unknown> : {};
+    try {
+        if (toolName === 'fleet_status') {
+            requireScope(extra, 'fleet:read', enforceScopes);
+            const projectId = '';
+            const hostname = requiredString(args, 'hostname');
+            return jsonResult(await backend.fleetStatus(projectId, hostname));
+        }
+        if (toolName === 'list_devices') {
+            requireScope(extra, 'fleet:read', enforceScopes);
+            const projectId = '';
+            return jsonResult({ devices: await backend.listDevices(projectId) });
+        }
+        if (toolName === 'ping') {
+            requireScope(extra, 'fleet:read', enforceScopes);
+            return jsonResult(await backend.ping('', requiredString(args, 'hostname')));
+        }
+        if (toolName === 'who_am_i') {
+            requireScope(extra, 'fleet:read', enforceScopes);
+            return jsonResult(await backend.whoAmI());
+        }
+        if (toolName === 'get_tool_result') {
+            requireScope(extra, 'fleet:read', enforceScopes);
+            return jsonResult(await backend.getToolResult(
+                '',
+                typeof args.hostname === 'string' ? args.hostname : '',
+                requiredString(args, 'call_id'),
+            ));
+        }
+        if (toolName === 'list_remote_tool_calls') {
+            requireScope(extra, 'fleet:read', enforceScopes);
+            const projectId = '';
+            const hostname = typeof args.hostname === 'string' && args.hostname.trim() ? args.hostname.trim() : undefined;
+            const limit = typeof args.limit === 'number' && Number.isInteger(args.limit) ? args.limit : 20;
+            return jsonResult({ calls: await backend.listRemoteToolCalls(projectId, hostname, limit) });
+        }
+
+        if (toolName === 'get_usage_stats') {
+            requireScope(extra, 'fleet:read', enforceScopes);
+            return jsonResult(await backend.usageStats?.() ?? {});
+        }
+        const definition = REMOTE_BY_NAME.get(toolName);
+        if (!definition) return toolError(Object.assign(new Error(`Unknown LCM tool: ${toolName}`), { code: 'INVALID_TOOL' }));
+        requireScope(extra, definition.annotations?.readOnlyHint === true ? 'fleet:read' : 'fleet:write', enforceScopes);
+        const hostname = requiredString(args, 'hostname');
+        const forwarded = { ...args };
+        delete forwarded.hostname;
+        // Public device-first tools never accept legacy governance arguments.
+        // Governance context, when present, is opaque MCP metadata only.
+        delete forwarded.project_id; delete forwarded.scope_kind; delete forwarded.machine_approval;
+        if (request.params._meta) forwarded._lcm_context = request.params._meta;
+        if (backend.callDeviceTool) return await backend.callDeviceTool(hostname, toolName, forwarded) as any;
+        return await backend.callMachineTool(hostname, toolName, forwarded, true) as any;
+
+    } catch (error) {
+        return toolError(error);
+    }
 }
 
 async function handleMcpRequest(backend: FleetPluginBackend, req: IncomingMessage, res: ServerResponse): Promise<void> {

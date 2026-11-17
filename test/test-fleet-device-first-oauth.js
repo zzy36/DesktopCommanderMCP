@@ -5,6 +5,7 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Client as ModernClient, StreamableHTTPClientTransport as ModernTransport } from '@modelcontextprotocol/client';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createFleetOAuthPluginHttpServer } from '../dist/remote-device/fleet/oauth-plugin-server.js';
@@ -121,6 +122,7 @@ async function connect(accessToken) {
 
 let fullClient;
 let readClient;
+let modernClient;
 try {
   const registration = await registerClient();
   const full = await authorize(registration, ['fleet:read', 'fleet:write', 'offline_access']);
@@ -141,6 +143,22 @@ try {
   assert.equal(calls.some((call) => call.toolName === 'read_file' && call.hostname === 'YUAN'), true);
   assert.equal(calls.some((call) => call.toolName === 'write_file' && call.hostname === 'YUAN'), true);
 
+  // Official 2026 client discovers without legacy initialize. Same tools and scope seam.
+  modernClient = new ModernClient({ name: 'lcm-modern-test', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  await modernClient.connect(new ModernTransport(resourceUrl, {
+    requestInit: { headers: { authorization: `Bearer ${full.access_token}` } },
+  }));
+  assert.equal(modernClient.getProtocolEra(), 'modern');
+  assert.equal(modernClient.getNegotiatedProtocolVersion(), '2026-07-28');
+  assert.equal((await modernClient.listTools()).tools.length, 31);
+  const modernPing = await modernClient.callTool({ name: 'ping', arguments: { hostname: 'HEMA' } });
+  assert.equal(JSON.parse(modernPing.content[0].text).hostname, 'HEMA');
+  const beforeModern = calls.length;
+  const modernWrite = await modernClient.callTool({ name: 'write_file', arguments: { hostname: 'HEMA', path: 'C:\\probe.txt', content: 'ok', mode: 'rewrite' }, _meta: { lcm_test: 'opaque' } });
+  assert.equal(modernWrite.isError, undefined);
+  assert.equal(calls[beforeModern].hostname, 'HEMA');
+  assert.deepEqual(calls[beforeModern].args._lcm_context, { lcm_test: 'opaque' });
+  await modernClient.close(); modernClient = null;
   const refresh=await fetch(new URL('/token',issuerUrl),{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:registration.client_id,refresh_token:full.refresh_token})});
   assert.equal(refresh.status,200,'Refresh must accept omitted resource for its already-bound audience');
   const renewed=await refresh.json();
@@ -159,6 +177,13 @@ try {
   assert.equal(writeDenied.isError, true);
   assert.match(writeDenied.content?.[0]?.text ?? '', /INSUFFICIENT_SCOPE/);
 
+  modernClient = new ModernClient({ name: 'lcm-modern-read-test', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  await modernClient.connect(new ModernTransport(resourceUrl, { requestInit: { headers: { authorization: `Bearer ${readOnly.access_token}` } } }));
+  const callsBeforeDenial = calls.length;
+  const modernDenied = await modernClient.callTool({ name: 'write_file', arguments: { hostname: 'YUAN', path: 'C:\\probe.txt', content: 'deny' } });
+  assert.equal(modernDenied.isError, true);
+  assert.match(modernDenied.content[0].text, /INSUFFICIENT_SCOPE/);
+  assert.equal(calls.length, callsBeforeDenial);
   const expanded=await fetch(new URL('/token',issuerUrl),{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:registration.client_id,refresh_token:readOnly.refresh_token,scope:'fleet:read fleet:write'})});
   assert.equal(expanded.status,400,'Refresh cannot expand scopes');
   const restarted = new SingleUserOAuthProvider({ statePath, issuerUrl, resourceUrl });
@@ -168,6 +193,7 @@ try {
   assert.equal(persisted.resource.href, resourceUrl.href);
   console.log('LCM_DEVICE_FIRST_OAUTH_PASS');
 } finally {
+  await modernClient?.close().catch(() => undefined);
   await fullClient?.close().catch(() => undefined);
   await readClient?.close().catch(() => undefined);
   if (server.listening) await new Promise((resolve) => server.close(resolve));

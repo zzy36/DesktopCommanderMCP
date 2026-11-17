@@ -1,12 +1,12 @@
 import express, { Request, Response } from 'express';
 import { createServer } from 'node:http';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
     getOAuthProtectedResourceMetadataUrl,
     mcpAuthRouter,
 } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
-import { FleetPluginBackend, createFleetPluginMcpServer } from './plugin-server.js';
+import { FleetPluginBackend } from './plugin-server.js';
+import { createFleetModernMcpHandler } from './plugin-server-modern.js';
 import { FLEET_OAUTH_SCOPES, SingleUserOAuthProvider } from './single-user-oauth.js';
 
 export interface FleetOAuthPluginServerOptions {
@@ -35,9 +35,9 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
             return json(body);
         }) as typeof res.json;
         res.once('finish',()=>{
-            if(endpoint==='token'||res.statusCode>=400){
+            if(endpoint==='token'||res.statusCode>=400||(endpoint==='mcp'&&req.headers['mcp-protocol-version']==='2026-07-28')){
                 const grant=req.body?.grant_type;
-                console.info(JSON.stringify({event:'lcm_oauth_outcome',endpoint,status:res.statusCode,...(endpoint==='mcp'?{authenticated:Boolean((req as any).auth),rpcMethod:['initialize','notifications/initialized','tools/list','tools/call','ping'].includes(req.body?.method)?req.body.method:'other',protocolVersion:/^20\d{2}-\d{2}-\d{2}$/.test(String(req.headers['mcp-protocol-version']??''))?req.headers['mcp-protocol-version']:'unreported'}:{}),...(endpoint==='token'?{grantType:['refresh_token','authorization_code'].includes(grant)?grant:'other',resourceProvided:typeof req.body?.resource==='string'||Array.isArray(req.body?.resource)}:{}),...(errorCode?{errorCode}:{})}));
+                console.info(JSON.stringify({event:'lcm_oauth_outcome',endpoint,status:res.statusCode,...(endpoint==='mcp'?{authenticated:Boolean((req as any).auth),rpcMethod:['server/discover','initialize','notifications/initialized','tools/list','tools/call','ping'].includes(req.body?.method)?req.body.method:'other',protocolVersion:/^20\d{2}-\d{2}-\d{2}$/.test(String(req.headers['mcp-protocol-version']??''))?req.headers['mcp-protocol-version']:'unreported'}:{}),...(endpoint==='token'?{grantType:['refresh_token','authorization_code'].includes(grant)?grant:'other',resourceProvided:typeof req.body?.resource==='string'||Array.isArray(req.body?.resource)}:{}),...(errorCode?{errorCode}:{})}));
             }
         });next();
     });
@@ -90,12 +90,13 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
         expectedResource: resourceUrl,
     });
 
+    const handleMcp = createFleetModernMcpHandler(options.backend);
     app.post(
         resourceUrl.pathname,
         express.json({ limit: '256kb' }),
         bearer,
         async (req: Request, res: Response) => {
-            await handleAuthenticatedMcp(options.backend, req, res);
+            await handleMcp(req, res, req.body);
         },
     );
 
@@ -124,32 +125,6 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
 
 export function createFleetOAuthPluginHttpServer(options: FleetOAuthPluginServerOptions) {
     return createServer(createFleetOAuthPluginApp(options));
-}
-
-async function handleAuthenticatedMcp(
-    backend: FleetPluginBackend,
-    req: Request,
-    res: Response,
-): Promise<void> {
-    let server: ReturnType<typeof createFleetPluginMcpServer> | null = null;
-    let transport: StreamableHTTPServerTransport | null = null;
-    try {
-        server = createFleetPluginMcpServer(backend, { enforceOAuthScopes: true });
-        transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-        await server.connect(transport);
-        await transport.handleRequest(req, res, req.body);
-    } catch {
-        if (!res.headersSent) {
-            res.status(500).json({
-                jsonrpc: '2.0',
-                error: { code: -32603, message: 'Internal server error' },
-                id: null,
-            });
-        }
-    } finally {
-        await transport?.close().catch(() => undefined);
-        await server?.close().catch(() => undefined);
-    }
 }
 
 function setNoStore(res: Response): void {

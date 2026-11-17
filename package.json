@@ -93,7 +93,9 @@
   ],
   "dependencies": {
     "@desktop-commander/telemetry-contract": "file:vendor/telemetry-contract",
+    "@modelcontextprotocol/node": "2.1.2",
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "@modelcontextprotocol/server": "2.4.0",
     "@opendocsg/pdf2md": "^0.3.4",
     "@supabase/supabase-js": "^2.89.0",
     "@tiptap/core": "^3.31.4",
@@ -136,6 +138,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/mcpb": "^1.2.0",
+    "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/ext-apps": "^1.0.1",
     "@types/express": "^5.0.6",
     "@types/node": "^20.17.24",
