@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -141,6 +141,16 @@ try {
   assert.equal(calls.some((call) => call.toolName === 'read_file' && call.hostname === 'YUAN'), true);
   assert.equal(calls.some((call) => call.toolName === 'write_file' && call.hostname === 'YUAN'), true);
 
+  const refresh=await fetch(new URL('/token',issuerUrl),{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:registration.client_id,refresh_token:full.refresh_token})});
+  assert.equal(refresh.status,200,'Refresh must accept omitted resource for its already-bound audience');
+  const renewed=await refresh.json();
+  const refreshedProvider=new SingleUserOAuthProvider({statePath,issuerUrl,resourceUrl});
+  assert.equal((await refreshedProvider.verifyAccessToken(renewed.access_token)).resource.href,resourceUrl.href);
+  const wrongAudience=await fetch(new URL('/token',issuerUrl),{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:registration.client_id,refresh_token:renewed.refresh_token,resource:'https://unrelated.example/mcp'})});
+  assert.equal(wrongAudience.status,400);assert.equal((await wrongAudience.json()).error,'invalid_grant');
+  const oldAgain=await fetch(new URL('/token',issuerUrl),{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:registration.client_id,refresh_token:full.refresh_token})});
+  assert.equal(oldAgain.status,400,'Consumed refresh token remains rejected');
+  const text=await readFile(statePath,'utf8');assert(!text.includes(renewed.access_token)&&!text.includes(renewed.refresh_token));
   const readOnly = await authorize(registration, ['fleet:read']);
   readClient = await connect(readOnly.access_token);
   const readOk = await readClient.callTool({ name: 'read_file', arguments: { hostname: 'YUAN', path: 'C:\\probe.txt' } });
@@ -149,6 +159,8 @@ try {
   assert.equal(writeDenied.isError, true);
   assert.match(writeDenied.content?.[0]?.text ?? '', /INSUFFICIENT_SCOPE/);
 
+  const expanded=await fetch(new URL('/token',issuerUrl),{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:registration.client_id,refresh_token:readOnly.refresh_token,scope:'fleet:read fleet:write'})});
+  assert.equal(expanded.status,400,'Refresh cannot expand scopes');
   const restarted = new SingleUserOAuthProvider({ statePath, issuerUrl, resourceUrl });
   const persisted = await restarted.verifyAccessToken(readOnly.access_token);
   assert.equal(persisted.clientId, registration.client_id);

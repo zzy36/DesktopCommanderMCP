@@ -23,6 +23,25 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
     const resourceUrl = new URL(options.resourceUrl.href);
     const app = express();
     app.disable('x-powered-by');
+    // Observe protocol outcomes only. Never log URLs, client/device IDs, tokens,
+    // request bodies, cookies, headers, state, or provider error descriptions.
+    app.use((req:Request,res:Response,next)=>{
+        const endpoint=req.path==='/token'?'token':req.path===resourceUrl.pathname?'mcp':null;
+        if(!endpoint){next();return;}
+        let errorCode:string|undefined;
+        const json=res.json.bind(res);
+        res.json=((body:any)=>{
+            if(typeof body?.error==='string'&&['invalid_grant','invalid_client','invalid_request','invalid_scope','invalid_target','unauthorized_client','unsupported_grant_type'].includes(body.error))errorCode=body.error;
+            return json(body);
+        }) as typeof res.json;
+        res.once('finish',()=>{
+            if(endpoint==='token'||res.statusCode>=400){
+                const grant=req.body?.grant_type;
+                console.info(JSON.stringify({event:'lcm_oauth_outcome',endpoint,status:res.statusCode,...(endpoint==='token'?{grantType:['refresh_token','authorization_code'].includes(grant)?grant:'other',resourceProvided:typeof req.body?.resource==='string'||Array.isArray(req.body?.resource)}:{}),...(errorCode?{errorCode}:{})}));
+            }
+        });next();
+    });
+
 
     app.get('/healthz', (_req: Request, res: Response) => {
         setNoStore(res);

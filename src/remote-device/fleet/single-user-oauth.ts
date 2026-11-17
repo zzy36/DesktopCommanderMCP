@@ -422,7 +422,9 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
         const now = Math.floor(Date.now() / 1000);
         if (!stored || stored.expiresAt <= now) throw new InvalidGrantError('invalid or expired refresh token');
         if (stored.clientId !== client.client_id) throw new InvalidGrantError('refresh token belongs to a different client');
-        const normalizedResource = resource ? normalizeResourceUrl(resource) : null;
+        // A refresh grant already carries its audience binding. A client may omit
+        // the optional resource indicator; an explicit different resource still fails.
+        const normalizedResource = normalizeResourceUrl(resource ?? new URL(stored.resource));
         if (!normalizedResource || normalizedResource.href !== stored.resource || stored.resource !== this.resourceUrl.href) {
             throw new InvalidGrantError('resource does not match refresh token');
         }
