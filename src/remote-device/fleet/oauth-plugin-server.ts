@@ -37,7 +37,7 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
         res.once('finish',()=>{
             if(endpoint==='token'||res.statusCode>=400){
                 const grant=req.body?.grant_type;
-                console.info(JSON.stringify({event:'lcm_oauth_outcome',endpoint,status:res.statusCode,...(endpoint==='token'?{grantType:['refresh_token','authorization_code'].includes(grant)?grant:'other',resourceProvided:typeof req.body?.resource==='string'||Array.isArray(req.body?.resource)}:{}),...(errorCode?{errorCode}:{})}));
+                console.info(JSON.stringify({event:'lcm_oauth_outcome',endpoint,status:res.statusCode,...(endpoint==='mcp'?{authenticated:Boolean((req as any).auth),rpcMethod:['initialize','notifications/initialized','tools/list','tools/call','ping'].includes(req.body?.method)?req.body.method:'other',protocolVersion:/^20\d{2}-\d{2}-\d{2}$/.test(String(req.headers['mcp-protocol-version']??''))?req.headers['mcp-protocol-version']:'unreported'}:{}),...(endpoint==='token'?{grantType:['refresh_token','authorization_code'].includes(grant)?grant:'other',resourceProvided:typeof req.body?.resource==='string'||Array.isArray(req.body?.resource)}:{}),...(errorCode?{errorCode}:{})}));
             }
         });next();
     });
