@@ -33,6 +33,7 @@ const server = createFleetAdminHttpServer(gateway, {
   bridgeWindowModes,
   onSetBridgeWindowMode: async (hostname, mode) => { requestedBridgeWindowMode = { hostname, mode }; },
   onGetRdcStatuses: async () => rdcStatuses,
+  onRdcAccountMigration: async (hostname,action) => ({hostname,stage:action==='finish'?'CONNECTED':'PAIRED'}),
   onUpdateCommandPolicy: async hostname => ({status:'scheduled',hostname}),
   onControlRdc: async (hostname, action) => {
     requestedRdcAction = { hostname, action };
@@ -66,6 +67,11 @@ try {
   assert.equal((await fetch(base+'/api/devices/update-command-policy',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN',command:'anything'})})).status,400);
   const policyUpdateResponse=await fetch(base+'/api/devices/update-command-policy',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN'})});
   assert.equal(policyUpdateResponse.status,202);assert.equal((await policyUpdateResponse.json()).hostname,'YUAN');
+  assert.equal((await rawFetch(base+'/api/devices/rdc-account',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN',action:'status'})})).status,401);
+  assert.equal((await rawFetch(base+'/api/devices/rdc-account',{method:'POST',headers:{cookie:session.cookie,origin,'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN',action:'status'})})).status,403);
+  assert.equal((await fetch(base+'/api/devices/rdc-account',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN',action:'status',token:'FIXTURE'})})).status,400);
+  const accountStatus=await fetch(base+'/api/devices/rdc-account',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hostname:'YUAN',action:'status'})});
+  assert.equal(accountStatus.status,200);assert.equal((await accountStatus.json()).hostname,'YUAN');
   const oldStatus=gateway.machineDeviceStatus.bind(gateway), oldDispatch=gateway.dispatchDevice.bind(gateway);
   gateway.machineDeviceStatus=()=>({online:true});
   const diagnosticCalls=[];
@@ -85,6 +91,7 @@ try {
   assert.match(html, /class="device-grid"/);
   assert.match(html, /data-window-mode="hidden"/);
   assert.match(html, /RDC 备用通道/);
+  assert.match(html, /尚未同步/);
   assert.match(html, /data-rdc-action="restart"/);
   assert.match(html, /自动启动：/);
   assert.match(html, /已开启/);

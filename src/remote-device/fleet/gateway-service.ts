@@ -1,6 +1,7 @@
 import { MAX_FLEET_FRAME_BYTES } from './wire-limits.js';
 import { LocalAdminSecurity } from './local-admin-security.js';
 import { commandPolicyMaintenance } from './command-policy-maintenance.js';
+import {RdcAccountMigration} from './rdc-account-migration.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -62,6 +63,7 @@ export async function startFleetGatewayService(
     const agentServer = createAgentHttpServer(config);
     const bridgeWindowModePath = path.join(config.stateDir, 'bridge-window-modes.json');
     const bridgeWindowModes = await loadBridgeWindowModes(bridgeWindowModePath);
+    const rdcAccounts=env.LCM_RDC_ACCOUNT_PACKAGE ? new RdcAccountMigration(gateway,env.LCM_RDC_ACCOUNT_PACKAGE,config.stateDir,(host,action)=>controlRdc(gateway,host,action)) : undefined;
     const adminServer = config.adminListenPort !== undefined && config.adminListenHost && config.adminBasePath
         ? createFleetAdminHttpServer(gateway, {
             security: security!,
@@ -80,6 +82,7 @@ export async function startFleetGatewayService(
                 gateway.revokeDeviceBinding(hostname);
             },
             bridgeWindowModes,
+            onRdcAccountMigration:rdcAccounts ? (host,action)=>rdcAccounts.perform(host,action) : undefined,
             onSetBridgeWindowMode: async (hostname, mode) => {
                 const status = gateway.machineDeviceStatus(hostname);
                 if (!status.online) throw new Error(`target ${hostname} is offline`);
@@ -100,7 +103,7 @@ export async function startFleetGatewayService(
                         return;
                     }
                     try {
-                        output[device.hostname] = await controlRdc(gateway, device.hostname, 'status');
+                        output[device.hostname] = {...await controlRdc(gateway, device.hostname, 'status'),...(rdcAccounts ? await rdcAccounts.binding(device.hostname) : {})};
                     } catch (error) {
                         output[device.hostname] = { hostname: device.hostname, state: 'Unknown', error: error instanceof Error ? error.message : String(error) };
                     }
