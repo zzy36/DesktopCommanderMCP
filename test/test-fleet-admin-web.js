@@ -91,6 +91,9 @@ try {
   assert.match(html, /class="device-grid"/);
   assert.match(html, /data-window-mode="hidden"/);
   assert.match(html, /RDC 备用通道/);
+  assert.match(html, /RDC 云端：/);
+  assert.match(html, /LCM 在线/);
+  assert.match(html, /检查失败显示未知/);
   assert.match(html, /尚未同步/);
   assert.match(html, /data-rdc-action="restart"/);
   assert.match(html, /自动启动：/);

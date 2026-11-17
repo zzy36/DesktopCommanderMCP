@@ -4,9 +4,9 @@ import path from 'node:path';
 import {FleetGateway} from './fleet-gateway.js';
 import type {RdcAction,RdcStatus} from './admin-server.js';
 
-type Action='prepare'|'begin'|'status'|'finish';
-const actions=new Set(['prepare','begin','status','finish']);
-const stages=new Set(['NOT_STARTED','AWAITING_BROWSER','SAVING','PAIRED','FAILED']);
+type Action='prepare'|'begin'|'status'|'finish'|'health';
+const actions=new Set(['prepare','begin','status','finish','health']);
+const stages=new Set(['PREPARING','NOT_STARTED','AWAITING_BROWSER','SAVING','PAIRED','FAILED']);
 export class RdcAccountMigration {
     private pending=new Map<string,{pid:number;content:any[]}>();
     private writing:Promise<unknown>=Promise.resolve();
@@ -14,6 +14,7 @@ export class RdcAccountMigration {
     private async config(){
         const d=JSON.parse(await readFile(this.packagePath,'utf8'));
         if(!/^[a-zA-Z0-9-]{8,80}$/.test(d.operation)||!/^[a-f0-9]{64}$/.test(d.targetEmailSha256)||d.version!=='0.3.0'||createHash('sha256').update(d.helper).digest('hex')!==d.helperSha256)throw new Error('RDC migration package invalid');
+        if(createHash('sha256').update(d.cloudHelper??'').digest('hex')!==d.cloudHelperSha256)throw new Error('RDC cloud status package invalid');
         const key=createPublicKey(d.operatorPublicKey);if(key.asymmetricKeyType!=='rsa'||(key.asymmetricKeyDetails?.modulusLength??0)<3072)throw new Error('Operator verification key invalid');
         return d;
     }
@@ -37,12 +38,21 @@ export class RdcAccountMigration {
             const r=await this.gateway.dispatchDevice(hostname,tool,{...args,execution_context:context},45000) as any;
             if(r?.isError)throw new Error(`RDC migration ${tool} failed in ${context} context`);return r;
         };
-        const command=(mode:'begin'|'status')=>`$ErrorActionPreference='Stop'; $t=$null;$e=$null;$a=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:ProgramData 'NetworkFleet/run-agent.ps1'),[ref]$t,[ref]$e);$n=@($a.FindAll({param($x) $x -is [System.Management.Automation.Language.CommandAst] -and [System.IO.Path]::GetFileName($x.GetCommandName()) -in @('node','node.exe')},$true)|ForEach-Object{$_.GetCommandName()}|Select-Object -Unique);if($e.Count -or $n.Count -ne 1){throw 'Registered Node executable is ambiguous'};& ([string]$n[0]) '${helper}' '${mode}' '${config}'`;
+        const command=(mode:'begin'|'status'|'health')=>`$ErrorActionPreference='Stop'; $t=$null;$e=$null;$a=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:ProgramData 'NetworkFleet/run-agent.ps1'),[ref]$t,[ref]$e);$n=@($a.FindAll({param($x) $x -is [System.Management.Automation.Language.CommandAst] -and [System.IO.Path]::GetFileName($x.GetCommandName()) -in @('node','node.exe')},$true)|ForEach-Object{$_.GetCommandName()}|Select-Object -Unique);if($e.Count -or $n.Count -ne 1){throw 'Registered Node executable is ambiguous'};& ([string]$n[0]) '${mode==='health'?root+'/cloud-health.mjs':helper}' ${mode==='health'?'':"'"+mode+"' "}'${config}'`;
         if(action==='prepare'){
             await call('create_directory',{path:root},'system');
             await call('write_file',{path:helper,mode:'rewrite',content:cfg.helper},'system');
+            await call('write_file',{path:root+'/cloud-health.mjs',mode:'rewrite',content:cfg.cloudHelper},'system');
             await call('write_file',{path:config,mode:'rewrite',content:JSON.stringify({hostname,operation:cfg.operation,version:cfg.version,targetEmailSha256:cfg.targetEmailSha256,operatorPublicKey:cfg.operatorPublicKey})},'system');
             return {hostname,stage:'PREPARED'};
+        }
+        if(action==='health'){
+            const r=await call('start_process',{command:command('health'),shell:'powershell.exe',timeout_ms:15000});
+            const text=(r.content??[]).map((c:any)=>c.text??'').join('\n');
+            for(const line of text.split(/\r?\n/).reverse()){
+                try{const d=JSON.parse(line.trim());if(d.hostname===hostname&&['online','offline','unknown','signed-out','account-mismatch'].includes(d.cloudState))return {hostname,cloudState:d.cloudState,cloudReason:d.cloudReason,cloudCheckedAt:d.cloudCheckedAt,cloudLastSeenAt:d.cloudLastSeenAt};}catch{}
+            }
+            return {hostname,cloudState:'unknown',cloudReason:'STATUS_RESPONSE_UNAVAILABLE',cloudCheckedAt:new Date().toISOString()};
         }
         const readStatus=async()=>{
             const pending=this.pending.get(hostname);

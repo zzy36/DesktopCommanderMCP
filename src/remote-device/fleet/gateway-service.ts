@@ -64,6 +64,13 @@ export async function startFleetGatewayService(
     const bridgeWindowModePath = path.join(config.stateDir, 'bridge-window-modes.json');
     const bridgeWindowModes = await loadBridgeWindowModes(bridgeWindowModePath);
     const rdcAccounts=env.LCM_RDC_ACCOUNT_PACKAGE ? new RdcAccountMigration(gateway,env.LCM_RDC_ACCOUNT_PACKAGE,config.stateDir,(host,action)=>controlRdc(gateway,host,action)) : undefined;
+    const readRdcState=async(hostname:string,local?:RdcStatus):Promise<RdcStatus>=>{
+        const status=local??await controlRdc(gateway,hostname,'status');
+        let cloud:any={cloudState:'unknown'};
+        if(rdcAccounts){try{cloud=await rdcAccounts.perform(hostname,'health');}catch{cloud={cloudState:'unknown',cloudReason:'USER_STATUS_UNAVAILABLE',cloudCheckedAt:new Date().toISOString()};}}
+        return combineRdcHealth({...status,...(rdcAccounts?await rdcAccounts.binding(hostname):{})},cloud);
+    };
+
     const adminServer = config.adminListenPort !== undefined && config.adminListenHost && config.adminBasePath
         ? createFleetAdminHttpServer(gateway, {
             security: security!,
@@ -99,18 +106,18 @@ export async function startFleetGatewayService(
                 const output: Record<string, RdcStatus> = {};
                 await Promise.all(gateway.listKnownDeviceStatuses().map(async (device) => {
                     if (!device.online) {
-                        output[device.hostname] = { hostname: device.hostname, state: 'Offline', error: 'LCM agent offline' };
+                        output[device.hostname] = { hostname: device.hostname, state: 'Unknown', cloudState:'unknown', cloudReason:'LCM_AGENT_UNREACHABLE', error: 'LCM agent offline' };
                         return;
                     }
                     try {
-                        output[device.hostname] = {...await controlRdc(gateway, device.hostname, 'status'),...(rdcAccounts ? await rdcAccounts.binding(device.hostname) : {})};
+                        output[device.hostname] = await readRdcState(device.hostname);
                     } catch (error) {
                         output[device.hostname] = { hostname: device.hostname, state: 'Unknown', error: error instanceof Error ? error.message : String(error) };
                     }
                 }));
                 return output;
             },
-            onControlRdc: async (hostname, action) => controlRdc(gateway, hostname, action),
+            onControlRdc: async (hostname, action) => readRdcState(hostname,await controlRdc(gateway, hostname, action)),
             oauthProvider: mcpRuntime.oauthProvider,
         })
         : null;
@@ -319,6 +326,10 @@ async function controlRdc(gateway: FleetGateway, hostname: string, action: RdcAc
         execution_context: 'system',
     }, 20000);
     return extractRdcStatus(result, hostname);
+}
+
+export function combineRdcHealth(local:RdcStatus,cloud:Partial<RdcStatus>):RdcStatus {
+    return {...local,...cloud,...(local.state!=='Running'?{cloudState:'offline',cloudReason:'LOCAL_SUPERVISOR_STOPPED'}:{})};
 }
 
 export function rdcControlCommand(action: RdcAction): string {
