@@ -171,13 +171,37 @@ try {
 
   // Official 2026 client discovers without legacy initialize. Same tools and scope seam.
   modernClient = new ModernClient({ name: 'lcm-modern-test', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  let listEncoding = 'gzip;q=0, identity';
+  let listWire;
   await modernClient.connect(new ModernTransport(resourceUrl, {
     requestInit: { headers: { authorization: `Bearer ${full.access_token}` } },
+    fetch: async (input, init) => {
+      const headers = new Headers(init?.headers);
+      if (headers.get('mcp-method') !== 'tools/list') return fetch(input, init);
+
+      headers.set('accept-encoding', listEncoding);
+      const response = await fetch(input, { ...init, headers });
+      const encoding = response.headers.get('content-encoding');
+      const bytes = encoding
+        ? Number(response.headers.get('content-length'))
+        : Buffer.byteLength(await response.clone().text());
+      listWire = { encoding, bytes, vary: response.headers.get('vary') };
+      return response;
+    },
   }));
   assert.equal(modernClient.getProtocolEra(), 'modern');
   assert.match(modernClient.getInstructions(), /Only after LCM is selected/);
   assert.equal(modernClient.getNegotiatedProtocolVersion(), '2026-07-28');
-  assert.equal((await modernClient.listTools()).tools.length, 31);
+  const plainCatalog = await modernClient.listTools();
+  const plainWire = listWire;
+  assert.equal(plainCatalog.tools.length, 31);
+  assert.equal(plainWire.encoding, null);
+  assert.match(plainWire.vary ?? '', /accept-encoding/i);
+  listEncoding = 'gzip';
+  assert.deepEqual(await modernClient.listTools(), plainCatalog);
+  assert.equal(listWire.encoding, 'gzip');
+  assert.ok(listWire.bytes > 0 && listWire.bytes < plainWire.bytes / 4);
+  console.log(`LCM_TOOL_CATALOG_WIRE_BYTES plain=${plainWire.bytes} gzip=${listWire.bytes}`);
   const modernPing = await modernClient.callTool({ name: 'ping', arguments: { hostname: 'HEMA' } });
   assert.equal(JSON.parse(modernPing.content[0].text).hostname, 'HEMA');
   const beforeModern = calls.length;
