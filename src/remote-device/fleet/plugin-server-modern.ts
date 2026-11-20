@@ -12,7 +12,11 @@ const gzipBody = promisify(gzip);
 export function createFleetModernMcpHandler(backend: FleetPluginBackend) {
     const handler = createMcpHandler(() => {
         const server = new Server(FLEET_SERVER_INFO, FLEET_SERVER_OPTIONS);
-        server.setRequestHandler('tools/list', async () => listFleetTools());
+        server.setRequestHandler('tools/list', async () => ({
+            // Discovery already carries the shared brand icon. Do not repeat its
+            // inline SVG in every entry sent over the public transport.
+            tools: listFleetTools().tools.map(({ icons: _sharedIcon, ...tool }) => tool),
+        }));
         server.setRequestHandler('tools/call', async (request, ctx) =>
             callFleetTool(backend, { enforceOAuthScopes: true }, request, { authInfo: ctx.http?.authInfo }));
         return server;
@@ -27,8 +31,8 @@ export function createFleetModernMcpHandler(backend: FleetPluginBackend) {
                 return response;
             }
 
-            // Tool schemas repeat the embedded brand icon. Compress the complete
-            // catalog without changing the tools or any streamed MCP result.
+            // Compress the catalog for clients that accept it. Keep streamed MCP
+            // results on the normal response path.
             const body = await gzipBody(new Uint8Array(await response.arrayBuffer()));
             const headers = new Headers(response.headers);
             headers.set('content-encoding', 'gzip');

@@ -12,6 +12,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createFleetOAuthPluginHttpServer } from '../dist/remote-device/fleet/oauth-plugin-server.js';
 import { SingleUserOAuthProvider } from '../dist/remote-device/fleet/single-user-oauth.js';
+import { FLEET_SERVER_INFO, listFleetTools } from '../dist/remote-device/fleet/plugin-server.js';
 
 async function freePort() {
   const server = createNetServer();
@@ -195,6 +196,11 @@ try {
   const plainCatalog = await modernClient.listTools();
   const plainWire = listWire;
   assert.equal(plainCatalog.tools.length, 31);
+  assert.deepEqual(modernClient.getServerVersion()?.icons, FLEET_SERVER_INFO.icons);
+  assert.ok(plainWire.bytes < 32 * 1024, 'Public tools/list must stay under 32 KiB without compression');
+  const expectedTools = listFleetTools().tools.map(({ icons, ...tool }) => tool);
+  assert.deepEqual(plainCatalog.tools, expectedTools);
+  assert.deepEqual(listed.tools, expectedTools);
   assert.equal(plainWire.encoding, null);
   assert.match(plainWire.vary ?? '', /accept-encoding/i);
   listEncoding = 'gzip';
