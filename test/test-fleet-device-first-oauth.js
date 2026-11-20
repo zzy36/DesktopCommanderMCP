@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
+import { Agent, get } from 'node:http';
+import { setTimeout as delay } from 'node:timers/promises';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -120,10 +122,31 @@ async function connect(accessToken) {
   return client;
 }
 
+async function verifyRelayKeepAlive() {
+  const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+  const checkHealth = () => new Promise((resolve, reject) => {
+    const request = get(new URL('/healthz', issuerUrl), { agent }, (response) => {
+      response.on('error', reject);
+      response.on('end', () => resolve({ status: response.statusCode, reusedSocket: request.reusedSocket }));
+      response.resume();
+    });
+    request.on('error', reject);
+  });
+  try {
+    assert.equal((await checkHealth()).status, 200);
+    // Node's default public listener closes an idle connection after five seconds plus its one-second buffer.
+    await delay(6_500);
+    assert.deepEqual(await checkHealth(), { status: 200, reusedSocket: true });
+  } finally {
+    agent.destroy();
+  }
+}
+
 let fullClient;
 let readClient;
 let modernClient;
 try {
+  await verifyRelayKeepAlive();
   const registration = await registerClient();
   const full = await authorize(registration, ['fleet:read', 'fleet:write', 'offline_access']);
   fullClient = await connect(full.access_token);

@@ -124,7 +124,9 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
 }
 
 export function createFleetOAuthPluginHttpServer(options: FleetOAuthPluginServerOptions) {
-    return createServer(createFleetOAuthPluginApp(options));
+    // The relay can still be delivering a tool list after Node has written it locally.
+    // Keep the connection open for the connector's next request on the same socket.
+    return createServer({ keepAliveTimeout: 75_000 }, createFleetOAuthPluginApp(options));
 }
 
 function setNoStore(res: Response): void {
