@@ -8,6 +8,7 @@ import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middlew
 import { FleetPluginBackend } from './plugin-server.js';
 import { createFleetModernMcpHandler } from './plugin-server-modern.js';
 import { FLEET_OAUTH_SCOPES, SingleUserOAuthProvider } from './single-user-oauth.js';
+import { currentMcpTrace, readTraceKey, traceGatewayRequest, traceRpcMethod } from './mcp-request-trace.js';
 
 export interface FleetOAuthPluginServerOptions {
     backend: FleetPluginBackend;
@@ -23,6 +24,8 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
     const resourceUrl = new URL(options.resourceUrl.href);
     const app = express();
     app.disable('x-powered-by');
+    const traceKey = readTraceKey(process.env.LCM_MCP_TRACE_KEY);
+    if (traceKey) app.post(resourceUrl.pathname, (req, res, next) => traceGatewayRequest(req, res, traceKey, next));
     // Observe protocol outcomes only. Never log URLs, client/device IDs, tokens,
     // request bodies, cookies, headers, state, or provider error descriptions.
     app.use((req:Request,res:Response,next)=>{
@@ -96,6 +99,7 @@ export function createFleetOAuthPluginApp(options: FleetOAuthPluginServerOptions
         express.json({ limit: '256kb' }),
         bearer,
         async (req: Request, res: Response) => {
+            currentMcpTrace()?.stage('gateway_authenticated', { rpcMethod: traceRpcMethod(req.body?.method) });
             await handleMcp(req, res, req.body);
         },
     );

@@ -9,6 +9,7 @@ import {
 } from './identity.js';
 import { AgentDescriptor, DeviceBinding, FleetRoutingError, ProjectBinding } from './protocol.js';
 import { FleetRouter } from './router.js';
+import { currentMcpTrace, McpRequestTrace } from './mcp-request-trace.js';
 
 export interface FleetGatewaySocket {
     readonly readyState: number;
@@ -88,6 +89,7 @@ type PendingCall = {
     resolve: (value: unknown) => void;
     reject: (error: Error) => void;
     createdAtMs: number;
+    trace?: McpRequestTrace;
 };
 
 const SOCKET_OPEN = 1;
@@ -226,6 +228,7 @@ export class FleetGateway {
         const callId = suppliedCallId ?? randomUUID();
         const generation = session.generation;
         const createdAtMs = Date.now();
+        const trace = currentMcpTrace();
         const record: FleetGatewayCallRecord = {
             callId, scopeKind: 'device', projectId: null, hostname, toolName, sessionId: session.sessionId, generation,
             status: 'pending', createdAtMs, completedAtMs: null, code: null, error: null,
@@ -243,14 +246,18 @@ export class FleetGateway {
                 reject(error);
             }, Math.max(1, timeoutMs));
             this.pendingCalls.set(callId, {
-                callId, sessionId: session.sessionId, generation, scopeKind: 'device', projectId: null, hostname, toolName, timer, resolve, reject, createdAtMs,
+                callId, sessionId: session.sessionId, generation, scopeKind: 'device', projectId: null, hostname, toolName, timer, resolve, reject, createdAtMs, trace,
             });
         });
-        this.send(session, {
+        const sent = this.send(session, {
             type: 'call', callId, scopeKind: 'device', hostname, toolName, args, generation,
         });
+        if (sent) trace?.stage('dispatch');
         void this.auditCall(record, 'dispatched');
-        return response;
+        return trace ? response.catch(error => {
+            trace.stage('dispatch_ended', { outcome: 'error' });
+            throw error;
+        }) : response;
     }
 
     beginDeviceCall(hostname: string, tool: string, args: Record<string, unknown>, timeoutMs = this.callTimeoutMs) {
@@ -522,6 +529,7 @@ export class FleetGateway {
         clearTimeout(pending.timer);
         this.pendingCalls.delete(callId);
         const ok = message.ok === true;
+        pending.trace?.stage('receipt', { outcome: ok ? 'ok' : 'error' });
         const durationMs = Date.now() - pending.createdAtMs;
         if (ok) {
             this.finishCallRecord(callId, 'completed', null, null, message.result);
@@ -670,11 +678,12 @@ export class FleetGateway {
         }, this.heartbeatSweepMs);
     }
 
-    private send(session: GatewaySession, message: GatewayWireMessage): void {
-        if (session.socket.readyState !== SOCKET_OPEN) return;
+    private send(session: GatewaySession, message: GatewayWireMessage): boolean {
+        if (session.socket.readyState !== SOCKET_OPEN) return false;
         const body = JSON.stringify(message);
         this.counters.sentBytes += Buffer.byteLength(body);
         session.socket.send(body);
+        return true;
     }
 
     private parseMessage(data: unknown): GatewayWireMessage {
