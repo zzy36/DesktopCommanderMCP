@@ -15,7 +15,8 @@ $network=Join-Path $env:ProgramData 'NetworkFleet'
 $bridge=Join-Path $env:ProgramData 'LocalControlMCP-UserBridge'
 $runtime=Join-Path $root ('releases\'+$Release)
 $node=(Get-Command node -ErrorAction Stop).Source
-$pwsh=(Get-Command pwsh -ErrorAction Stop).Source
+$pwsh=Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'PowerShell\7\pwsh.exe'
+if($InstallTask -and -not (Test-Path -LiteralPath $pwsh -PathType Leaf)){throw 'Install standalone PowerShell 7 before registering LCM tasks.'}
 New-Item -ItemType Directory -Force -Path $root,(Join-Path $root 'releases')|Out-Null
 if(-not(Test-Path -LiteralPath $runtime)){
  $stage=Join-Path $root ('.stage-device-'+[guid]::NewGuid().ToString('N'))

@@ -13,6 +13,9 @@ param(
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 
+$pwsh=Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'PowerShell\7\pwsh.exe'
+if($InstallTask -and -not (Test-Path -LiteralPath $pwsh -PathType Leaf)){throw 'Install standalone PowerShell 7 before registering LCM tasks.'}
+
 $controlRoot=(Resolve-Path -LiteralPath $ControlRoot).Path
 $profile=Get-Content -LiteralPath (Join-Path $controlRoot 'r0.profile.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $spec=$profile.local_control_mcp
@@ -141,9 +144,8 @@ $runLines=@(
 $taskName="NetworkFleetAgent-$deviceName"
 $taskInstalled=$false
 if($InstallTask){
-  $bridgeRaw=& pwsh -NoProfile -File (Join-Path $PSScriptRoot 'install-user-bridge.ps1') -RuntimeRoot $runtimeRoot -ControlRoot $controlRoot -ExpectedHostname $deviceName|Out-String
+  $bridgeRaw=& $pwsh -NoProfile -File (Join-Path $PSScriptRoot 'install-user-bridge.ps1') -RuntimeRoot $runtimeRoot -ControlRoot $controlRoot -ExpectedHostname $deviceName|Out-String
   if($LASTEXITCODE -ne 0){throw 'Interactive user executor installation failed'}
-  $pwsh=(Get-Command pwsh -ErrorAction Stop).Source
   $existing=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
   if($existing){
     $actions=@($existing.Actions)

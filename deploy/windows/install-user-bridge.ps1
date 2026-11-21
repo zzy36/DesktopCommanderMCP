@@ -3,6 +3,8 @@ param([Parameter(Mandatory)][string]$RuntimeRoot,[Parameter(Mandatory)][string]$
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 if(-not $env:COMPUTERNAME.Equals($ExpectedHostname,[StringComparison]::OrdinalIgnoreCase)){throw 'Exact D0 mismatch'}
+$pwsh=Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'PowerShell\7\pwsh.exe'
+if(-not (Test-Path -LiteralPath $pwsh -PathType Leaf)){throw 'Install standalone PowerShell 7 before registering the LCM user bridge.'}
 $runtime=(Resolve-Path -LiteralPath $RuntimeRoot).Path
 $control=(Resolve-Path -LiteralPath $ControlRoot).Path
 $main=Join-Path $runtime 'dist\remote-device\fleet\user-bridge-main.js'
@@ -31,7 +33,6 @@ if($existing){
  Export-ScheduledTask -TaskName $name|Set-Content -LiteralPath $backup -Encoding UTF8
  Stop-ScheduledTask -TaskName $name
 }
-$pwsh=(Get-Command pwsh -ErrorAction Stop).Source
 $action=New-ScheduledTaskAction -Execute $pwsh -Argument ('-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $run)
 $trigger=New-ScheduledTaskTrigger -AtLogOn -User $user
 $principal=New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
