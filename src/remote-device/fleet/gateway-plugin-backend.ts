@@ -31,7 +31,7 @@ export class FleetGatewayPluginBackend implements FleetPluginBackend {
     }
     async listRemoteToolCalls(_legacy: string, hostname: string | undefined, limit: number) {
         const exact = hostname ? canonicalHostname(hostname) : undefined;
-        return this.gateway.listCallRecords(1024).filter(r => !exact || r.hostname === exact).slice(0, Math.max(1, Math.min(limit, 100))).map(r => ({ ...r }));
+        return this.gateway.listCallRecords(1024).filter(r => !exact || r.hostname === exact).slice(0, Math.max(1, Math.min(limit, 100))).map(({ result, ...record }) => ({ ...record, hasResult: result !== undefined }));
     }
     async usageStats() { return this.gateway.usageStats(); }
 }

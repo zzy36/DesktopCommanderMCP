@@ -26,25 +26,41 @@ export function createMcpTraceEdge(upstreamPort: number, traceKey: Buffer) {
         }
         const trace = req.method === 'POST' && url.split('?', 1)[0] === '/mcp' ? new McpRequestTrace() : undefined;
         const headers = forwardHeaders(req.headers);
+        // Count upstream response bytes only; never retain bodies or headers.
+        let upstreamBytes = 0;
         if (trace) {
             headers[TRACE_ID_HEADER] = trace.requestId;
             headers[TRACE_PROOF_HEADER] = traceProof(trace.requestId, traceKey);
             res.setHeader(TRACE_ID_HEADER, trace.requestId);
             trace.stage('edge_received');
-            res.once('finish', () => trace.stage('edge_response', { status: res.statusCode }));
+            res.once('finish', () => trace.stage('edge_response', { status: res.statusCode, upstreamBytes }));
             res.once('close', () => {
-                if (!res.writableFinished) trace.stage('edge_closed');
+                if (!res.writableFinished) trace.stage('edge_closed', { upstreamBytes });
             });
         }
         const upstream = request({
             host: '127.0.0.1', port: upstreamPort, method: req.method, path: url, headers,
         }, incoming => {
+            trace?.stage('edge_upstream_headers', { status: incoming.statusCode ?? 502 });
+            if (trace) {
+                let firstByte = true;
+                incoming.on('data', (chunk: Buffer | string) => {
+                    upstreamBytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+                    if (firstByte) {
+                        firstByte = false;
+                        trace.stage('edge_upstream_first_byte', { upstreamBytes });
+                    }
+                });
+                incoming.once('end', () => trace.stage('edge_upstream_end', { upstreamBytes }));
+                incoming.once('aborted', () => trace.stage('edge_upstream_aborted', { upstreamBytes, outcome: 'error' }));
+            }
             res.writeHead(incoming.statusCode ?? 502, forwardHeaders(incoming.headers));
             incoming.on('error', () => res.destroy());
             incoming.pipe(res);
         });
         upstream.once('finish', () => trace?.stage('edge_forwarded'));
         upstream.once('error', () => {
+            trace?.stage('edge_upstream_error', { upstreamBytes, outcome: 'error' });
             if (!res.headersSent && !res.destroyed) res.writeHead(502).end();
             else if (!res.writableFinished) res.destroy();
         });

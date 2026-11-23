@@ -6,7 +6,9 @@ export const TRACE_ID_HEADER = 'x-lcm-request-id';
 export const TRACE_PROOF_HEADER = 'x-lcm-trace-proof';
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-type Stage = 'edge_received' | 'edge_forwarded' | 'edge_response' | 'edge_closed' | 'gateway_received' |
+type Stage = 'edge_received' | 'edge_forwarded' | 'edge_response' | 'edge_closed' |
+    'edge_upstream_headers' | 'edge_upstream_first_byte' | 'edge_upstream_end' |
+    'edge_upstream_aborted' | 'edge_upstream_error' | 'gateway_received' |
     'gateway_authenticated' | 'dispatch' | 'receipt' | 'dispatch_ended' | 'gateway_response' | 'gateway_closed';
 type Outcome = 'ok' | 'error';
 const RPC_METHODS = ['server/discover', 'initialize', 'notifications/initialized', 'tools/list', 'tools/call', 'ping'] as const;
@@ -45,7 +47,8 @@ export class McpRequestTrace {
         private readonly source: 'edge' | 'verified_edge' | 'gateway' = 'edge',
     ) {}
 
-    stage(stage: Stage, details: { status?: number; outcome?: Outcome; rpcMethod?: RpcMethod } = {}) {
+    stage(stage: Stage, details: { status?: number; outcome?: Outcome; rpcMethod?: RpcMethod; upstreamBytes?: number } = {}) {
+        const { status, outcome, rpcMethod, upstreamBytes } = details;
         console.info(JSON.stringify({
             event: 'lcm_mcp_trace',
             requestId: this.requestId,
@@ -53,7 +56,10 @@ export class McpRequestTrace {
             stage,
             atMs: Date.now(),
             elapsedMs: Math.round(performance.now() - this.started),
-            ...details,
+            ...(status !== undefined ? { status } : {}),
+            ...(outcome !== undefined ? { outcome } : {}),
+            ...(rpcMethod !== undefined ? { rpcMethod } : {}),
+            ...(Number.isSafeInteger(upstreamBytes) && upstreamBytes! >= 0 ? { upstreamBytes } : {}),
         }));
     }
 }
