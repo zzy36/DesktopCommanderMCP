@@ -58,9 +58,15 @@ export function createMcpTraceEdge(upstreamPort: number, traceKey: Buffer) {
             incoming.on('error', () => res.destroy());
             incoming.pipe(res);
         });
+        upstream.once('socket', socket => {
+            trace?.stage('edge_upstream_socket', { reusedSocket: upstream.reusedSocket });
+            const connected = () => trace?.stage('edge_upstream_connected', { reusedSocket: upstream.reusedSocket });
+            if (socket.connecting) socket.once('connect', connected);
+            else connected();
+        });
         upstream.once('finish', () => trace?.stage('edge_forwarded'));
-        upstream.once('error', () => {
-            trace?.stage('edge_upstream_error', { upstreamBytes, outcome: 'error' });
+        upstream.once('error', (error: NodeJS.ErrnoException) => {
+            trace?.stage('edge_upstream_error', { upstreamBytes, outcome: 'error', errorCode: error.code, reusedSocket: upstream.reusedSocket });
             if (!res.headersSent && !res.destroyed) res.writeHead(502).end();
             else if (!res.writableFinished) res.destroy();
         });

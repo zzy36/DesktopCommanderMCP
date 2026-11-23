@@ -8,9 +8,10 @@ const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9
 
 type Stage = 'edge_received' | 'edge_forwarded' | 'edge_response' | 'edge_closed' |
     'edge_upstream_headers' | 'edge_upstream_first_byte' | 'edge_upstream_end' |
-    'edge_upstream_aborted' | 'edge_upstream_error' | 'gateway_received' |
+    'edge_upstream_aborted' | 'edge_upstream_error' | 'edge_upstream_socket' | 'edge_upstream_connected' | 'gateway_received' |
     'gateway_authenticated' | 'dispatch' | 'receipt' | 'dispatch_ended' | 'gateway_response' | 'gateway_closed';
 type Outcome = 'ok' | 'error';
+const SAFE_ERROR_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'ENETUNREACH', 'EHOSTUNREACH', 'ERR_STREAM_PREMATURE_CLOSE']);
 const RPC_METHODS = ['server/discover', 'initialize', 'notifications/initialized', 'tools/list', 'tools/call', 'ping'] as const;
 type RpcMethod = typeof RPC_METHODS[number] | 'other';
 
@@ -47,8 +48,8 @@ export class McpRequestTrace {
         private readonly source: 'edge' | 'verified_edge' | 'gateway' = 'edge',
     ) {}
 
-    stage(stage: Stage, details: { status?: number; outcome?: Outcome; rpcMethod?: RpcMethod; upstreamBytes?: number } = {}) {
-        const { status, outcome, rpcMethod, upstreamBytes } = details;
+    stage(stage: Stage, details: { status?: number; outcome?: Outcome; rpcMethod?: RpcMethod; upstreamBytes?: number; errorCode?: string; reusedSocket?: boolean } = {}) {
+        const { status, outcome, rpcMethod, upstreamBytes, errorCode, reusedSocket } = details;
         console.info(JSON.stringify({
             event: 'lcm_mcp_trace',
             requestId: this.requestId,
@@ -60,6 +61,8 @@ export class McpRequestTrace {
             ...(outcome !== undefined ? { outcome } : {}),
             ...(rpcMethod !== undefined ? { rpcMethod } : {}),
             ...(Number.isSafeInteger(upstreamBytes) && upstreamBytes! >= 0 ? { upstreamBytes } : {}),
+            ...(typeof errorCode === 'string' ? { errorCode: SAFE_ERROR_CODES.has(errorCode) ? errorCode : 'OTHER' } : {}),
+            ...(typeof reusedSocket === 'boolean' ? { reusedSocket } : {}),
         }));
     }
 }
